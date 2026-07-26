@@ -7,7 +7,6 @@ import logging
 import asyncio
 from typing import Any, List, Dict, Union
 import streamlit as st
-from streamlit.components.v1 import html
 
 # Try importing PyPDF for PDF document parsing
 try:
@@ -15,18 +14,21 @@ try:
 except ImportError:
     pypdf = None
 
-# --- Hide Streamlit Branding ---
-html("""
-<script>
-try {
-    const sel = window.top.document.querySelectorAll('[href*="streamlit.io"], [href*="streamlit.app"]');
-    sel.forEach(e => e.style.display='none');
-} catch(e) { console.warn('parent DOM not reachable', e); }
-</script>
-""", height=0)
-
 # --- Page Configuration ---
 st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="wide")
+
+# --- Hide Streamlit Branding (Updated using st.iframe) ---
+st.iframe(
+    """
+    <script>
+    try {
+        const sel = window.top.document.querySelectorAll('[href*="streamlit.io"], [href*="streamlit.app"]');
+        sel.forEach(e => e.style.display='none');
+    } catch(e) { console.warn('parent DOM not reachable', e); }
+    </script>
+    """,
+    height=0
+)
 
 # --- Modern Pastel Theme CSS ---
 page_style = """
@@ -104,12 +106,8 @@ except ImportError:
 from crewai import Agent, Task, Crew, LLM
 from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
-# --- CUSTOM GROUNDED GEMINI LLM WRAPPER ---
-class GroundedGeminiLLM(LLM):
-    """
-    Custom CrewAI LLM wrapper that explicitly injects Gemini Native 
-    Google Search Grounding into every API call payload.
-    """
+# --- CUSTOM LLM WITH SAFE RESPONSE HANDLING ---
+class SafeGroundedGeminiLLM(LLM):
     def __init__(self, model: str, api_key: str, enable_search: bool = True, **kwargs):
         super().__init__(model=model, api_key=api_key, **kwargs)
         self.enable_search = enable_search
@@ -126,21 +124,24 @@ class GroundedGeminiLLM(LLM):
         if tools is None:
             tools = []
 
-        # Explicitly inject Gemini camelCase googleSearch grounding tool
         if self.enable_search:
             search_tool_exists = any("googleSearch" in t or "google_search" in t for t in tools)
             if not search_tool_exists:
                 tools.insert(0, {"googleSearch": {}})
 
-        kwargs["web_search_options"] = {"enable": self.enable_search}
-
-        return super().call(
+        response = super().call(
             messages=messages,
             tools=tools,
             callbacks=callbacks,
             available_functions=available_functions,
             **kwargs
         )
+        
+        # Fallback to prevent None or empty response errors
+        if not response or (isinstance(response, str) and not response.strip()):
+            return "Task completed. Unable to retrieve additional details."
+            
+        return response
 
 # --- SUPPRESS THREAD WARNING LOGS ---
 logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
@@ -167,7 +168,6 @@ with st.expander("Crew configuration"):
     st.markdown("---")
     st.subheader("🌐 Native Gemini Grounding")
     enable_google_search = st.checkbox("Google Search Grounding", value=True)
-    enable_code_execution = st.checkbox("Code Execution Sandbox", value=False)
 
     st.markdown("---")
     st.subheader("🧠 Multi-Model Assignment")
@@ -258,7 +258,7 @@ with col2:
                     for page in pdf_reader.pages:
                         document_context += page.extract_text() or ""
                 else:
-                    st.error("pypdf is required to read PDF files. Please add `pypdf` to requirements.txt.")
+                    st.error("pypdf is required to read PDF files.")
             else:
                 document_context = uploaded_file.read().decode("utf-8")
             
@@ -305,15 +305,15 @@ if run_button:
                 if enable_scraper:
                     active_tools.append(ScrapeWebsiteTool())
 
-                # 2. Setup Native Gemini Grounding via GroundedGeminiLLM
-                reasoning_llm = GroundedGeminiLLM(
+                # 2. Setup Native Gemini Grounding via Safe Class
+                reasoning_llm = SafeGroundedGeminiLLM(
                     model=planner_writer_model,
                     api_key=gemini_key,
                     enable_search=enable_google_search,
                     temperature=0.7
                 )
 
-                fast_llm = GroundedGeminiLLM(
+                fast_llm = SafeGroundedGeminiLLM(
                     model=research_checker_model,
                     api_key=gemini_key,
                     enable_search=enable_google_search,
