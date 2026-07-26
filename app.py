@@ -108,31 +108,32 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-# --- SIDEBAR CONFIGURATION ---
-st.title("⚙️ Crew Configuration")
+
+st.expander("Crew configuration", expanded=True)
+
 
 # API Keys Configuration
-gemini_key = st.secrets.get("GEMINI_API_KEY")
-exa_key = st.secrets.get("EXA_API_KEY")
+    gemini_key = st.secrets.get("GEMINI_API_KEY")
+    exa_key = st.secrets.get("EXA_API_KEY")
 
-st.markdown("---")
-st.subheader("🛠️ Active Tools")
-enable_exa = st.checkbox("Enable Exa Search Tool", value=True)
-enable_scraper = st.checkbox("Enable Web Scraper Tool", value=True)
+    st.markdown("---")
+    st.subheader("🛠️ Active Tools")
+    enable_exa = st.checkbox("Enable Exa Search Tool", value=True)
+    enable_scraper = st.checkbox("Enable Web Scraper Tool", value=True)
 
-st.markdown("---")
-st.subheader("🌐 Native Gemini Grounding")
-enable_google_search = st.checkbox("Google Search Grounding", value=True)
-enable_code_execution = st.checkbox("Code Execution Sandbox", value=False)
+    st.markdown("---")
+    st.subheader("🌐 Native Gemini Grounding")
+    enable_google_search = st.checkbox("Google Search Grounding", value=True)
+    enable_code_execution = st.checkbox("Code Execution Sandbox", value=False)
 
-st.markdown("---")
-st.subheader("🧠 Multi-Model Assignment")
-planner_writer_model = st.selectbox(
+    st.markdown("---")
+    st.subheader("🧠 Multi-Model Assignment")
+    planner_writer_model = st.selectbox(
     "Planner & Writer Model",
     ["gemini/gemini-2.5-pro", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite"],
     index=1
 )
-research_checker_model = st.selectbox(
+    research_checker_model = st.selectbox(
     "Researcher & Checker Model",
     ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash"],
     index=0
