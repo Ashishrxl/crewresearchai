@@ -8,6 +8,8 @@ import asyncio
 import streamlit as st
 from streamlit.components.v1 import html
 
+modell = "gemini/gemini-3.1-flash-lite"
+
 # --- Hide Streamlit Branding ---
 html("""
 <script>
@@ -19,7 +21,7 @@ try {
 """, height=0)
 
 # --- Page Configuration ---
-st.set_page_config(page_title="CSV Visualizer & Forecasting", page_icon="📊", layout="centered")
+st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="centered")
 
 # --- Modern Pastel Theme CSS ---
 page_style = """
@@ -268,7 +270,7 @@ if run_button:
 
                 # 2. Gemini LLM
                 gemini_llm = LLM(
-                    model="gemini/gemini-3.5-flash-lite",
+                    model=modell,
                     api_key=gemini_key,
                     temperature=0.7
                 )
