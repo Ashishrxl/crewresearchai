@@ -173,8 +173,8 @@ st.markdown(
 
 
 # Retrieve keys from st.secrets if available, fallback to sidebar
-gemini_key = sidebar_gemini_key or (st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else "")
-exa_key = sidebar_exa_key or (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else "")
+gemini_key =(st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else "")
+exa_key =  (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else "")
 
 
 # --- THREAD-SAFE STDOUT REDIRECTOR ---
