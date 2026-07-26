@@ -6,6 +6,12 @@ import streamlit as st
 from crewai import Agent, Task, Crew, LLM
 from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
+# Fix asyncio event loop for Streamlit runner
+try:
+    asyncio.get_running_loop()
+except RuntimeError:
+    asyncio.set_event_loop(asyncio.new_event_loop())
+
 # Ignore warning messages
 warnings.filterwarnings('ignore')
 
@@ -22,11 +28,17 @@ st.markdown(
     "fact-check findings, and write actionable reports using **CrewAI** and **Gemini**."
 )
 
-
-# Retrieve keys from st.secrets if available, else require sidebar input
+# Retrieve keys from st.secrets if available
 gemini_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 exa_key = st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else ""
 
+# Sidebar input fallback
+with st.sidebar:
+    st.header("🔑 API Credentials")
+    if not gemini_key:
+        gemini_key = st.text_input("Gemini API Key", type="password")
+    if not exa_key:
+        exa_key = st.text_input("Exa API Key", type="password")
 
 
 # --- GUARDRAIL FUNCTION ---
@@ -89,9 +101,9 @@ run_button = st.button("🚀 Run Research Crew", type="primary", use_container_w
 # --- CREW EXECUTION FLOW ---
 if run_button:
     if not gemini_key or not exa_key:
-        st.error(" Please provide both **Gemini API Key** and **Exa API Key** in the sidebar to proceed.")
+        st.error("Please provide both **Gemini API Key** and **Exa API Key** in the sidebar to proceed.")
     elif not user_query.strip():
-        st.warning(" Please enter a valid research query.")
+        st.warning("Please enter a valid research query.")
     else:
         # Set environment variables required by tools and CrewAI
         os.environ["CREWAI_TESTING"] = "true"
@@ -108,7 +120,7 @@ if run_button:
 
                 # 2. Initialize Gemini Model
                 gemini_llm = LLM(
-                    model="gemini/gemini-3.5-flash-lite",
+                    model="gemini/gemini-1.5-flash",
                     api_key=gemini_key
                 )
 
@@ -259,7 +271,7 @@ if run_button:
 if 'report_md' in st.session_state:
     st.markdown("---")
     st.header("📄 Final Generated Research Report")
-    
+
     # Download Button
     st.download_button(
         label="📥 Download Report (.md)",
@@ -271,4 +283,3 @@ if 'report_md' in st.session_state:
 
     # Render Report Content
     st.markdown(st.session_state['report_md'])
-  
