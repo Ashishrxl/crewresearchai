@@ -8,8 +8,6 @@ import asyncio
 import streamlit as st
 from streamlit.components.v1 import html
 
-modell = "gemini/gemini-3.1-flash-lite"
-
 # --- Hide Streamlit Branding ---
 html("""
 <script>
@@ -21,7 +19,7 @@ try {
 """, height=0)
 
 # --- Page Configuration ---
-st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="centered")
+st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="wide")
 
 # --- Modern Pastel Theme CSS ---
 page_style = """
@@ -37,62 +35,22 @@ body, .stApp {
     text-align: center;
     font-size: 2.6rem;
     font-weight: 800;
-    margin-top: 1.5rem;
+    margin-top: 1rem;
     margin-bottom: 0.5rem;
     background: linear-gradient(90deg, #007BFF, #00C6A2);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
 
-/* --- Subtitle --- */
-.subtitle {
-    text-align: center;
-    font-size: 1.1rem;
-    color: #333;
-    opacity: 0.9;
-    margin-bottom: 2rem;
-}
-
 /* --- Card Container --- */
 .card {
     background: rgba(255, 255, 255, 0.7);
-    border-radius: 25px;
+    border-radius: 20px;
     box-shadow: 0 6px 15px rgba(0,0,0,0.08);
-    padding: 2rem;
-    margin: 1.5rem auto;
-    width: 90%;
-    max-width: 700px;
-    text-align: center;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
     backdrop-filter: blur(15px);
     border: 1px solid rgba(255,255,255,0.6);
-    transition: transform 0.25s ease, box-shadow 0.3s ease;
-}
-.card:hover {
-    transform: scale(1.02);
-    box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-}
-
-/* --- Card Headers with Pastel Gradients --- */
-.card-header {
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: white;
-    border-radius: 14px;
-    padding: 0.8rem 1rem;
-    display: inline-block;
-    margin-bottom: 1rem;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-}
-.card-header.forecast { background: linear-gradient(90deg, #a18cd1, #fbc2eb); }
-.card-header.analysis { background: linear-gradient(90deg, #89f7fe, #66a6ff); }
-.card-header.results { background: linear-gradient(90deg, #ffecd2, #fcb69f); }
-
-/* --- Paragraphs --- */
-.card p {
-    font-size: 1rem;
-    color: #222;
-    line-height: 1.6;
-    margin-bottom: 1.5rem;
 }
 
 /* --- File Upload Box --- */
@@ -101,15 +59,6 @@ body, .stApp {
     background: rgba(255,255,255,0.9);
     border-radius: 15px;
     transition: all 0.3s ease;
-    color: #333 !important;
-}
-[data-testid="stFileUploaderDropzone"]:hover {
-    border-color: #66a6ff;
-    background: rgba(255,255,255,1);
-    box-shadow: 0 0 12px rgba(102,166,255,0.3);
-}
-[data-testid="stFileUploaderDropzone"] * {
-    color: #333 !important;
 }
 
 /* --- Buttons --- */
@@ -124,7 +73,7 @@ body, .stApp {
     box-shadow: 0 4px 10px rgba(91,134,229,0.3);
 }
 .stButton > button:hover {
-    transform: scale(1.05);
+    transform: scale(1.02);
     background: linear-gradient(90deg, #5B86E5, #36D1DC);
 }
 
@@ -136,7 +85,7 @@ body, .stApp {
 """
 st.markdown(page_style, unsafe_allow_html=True)
 
-# Safe import for Streamlit script context across all Streamlit versions
+# Safe import for Streamlit script context
 try:
     from streamlit.runtime.scriptrunner_utils.script_run_context import add_script_run_ctx, get_script_run_ctx
 except ImportError:
@@ -159,23 +108,38 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-st.title("🤖 AI Research Crew")
-st.markdown(
-    "Break down complex queries into deep research plans, gather web data, "
-    "fact-check findings, and write actionable reports using **CrewAI** and **Gemini**."
+# --- SIDEBAR CONFIGURATION ---
+st.sidebar.title("⚙️ Crew Configuration")
+
+# API Keys Configuration
+gemini_key = st.sidebar.text_input("Gemini API Key", value=st.secrets.get("GEMINI_API_KEY", ""), type="password")
+exa_key = st.sidebar.text_input("Exa API Key", value=st.secrets.get("EXA_API_KEY", ""), type="password")
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🛠️ Active Tools")
+enable_exa = st.sidebar.checkbox("Enable Exa Search Tool", value=True)
+enable_scraper = st.sidebar.checkbox("Enable Web Scraper Tool", value=True)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🌐 Native Gemini Grounding")
+enable_google_search = st.sidebar.checkbox("Google Search Grounding", value=True)
+enable_code_execution = st.sidebar.checkbox("Code Execution Sandbox", value=False)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("🧠 Multi-Model Assignment")
+planner_writer_model = st.sidebar.selectbox(
+    "Planner & Writer Model",
+    ["gemini/gemini-2.5-pro", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite"],
+    index=1
 )
-
-# Retrieve keys from st.secrets if available, fallback to empty string
-gemini_key = (st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else "")
-exa_key = (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else "")
-
+research_checker_model = st.sidebar.selectbox(
+    "Researcher & Checker Model",
+    ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash"],
+    index=0
+)
 
 # --- THREAD-SAFE STDOUT REDIRECTOR ---
 class StreamlitLogRedirector(io.StringIO):
-    """
-    Thread-safe stream redirector that captures CrewAI terminal output 
-    without breaking runtime listeners or raising ScriptRunContext errors.
-    """
     def __init__(self, placeholder, ctx):
         super().__init__()
         self.placeholder = placeholder
@@ -205,7 +169,6 @@ class StreamlitLogRedirector(io.StringIO):
     def isatty(self):
         return False
 
-
 # --- GUARDRAIL FUNCTION ---
 def write_report_guardrail(output):
     try:
@@ -226,62 +189,98 @@ def write_report_guardrail(output):
 
     return (True, raw_output)
 
+# --- APP UI ---
+st.markdown("<h1 class='main-title'>🤖 Autonomous AI Research Crew</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'>Deconstruct complex questions, synthesize multi-source web data, and generate grounded reports.</p>", unsafe_allow_html=True)
 
-# --- MAIN INPUT SECTION WITH SESSION STATE KEY ---
-user_query = st.text_area(
-    "🔍 Enter your Research Query",
-    key="user_query_input",
-    height=120
-)
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    user_query = st.text_area(
+        "🔍 Enter your Research Query",
+        key="user_query_input",
+        height=140,
+        placeholder="e.g., Analyze the performance and memory overhead of Jetpack Compose vs Traditional Views in Android 12+..."
+    )
+
+with col2:
+    uploaded_file = st.file_uploader("📄 Attach Reference Document (Optional)", type=["txt", "md"])
+    document_context = ""
+    if uploaded_file is not None:
+        try:
+            document_context = uploaded_file.read().decode("utf-8")
+            st.success(f"Attached: {uploaded_file.name}")
+        except Exception as e:
+            st.error(f"Error reading file: {e}")
+
 run_button = st.button("🚀 Run Research Crew", type="primary", use_container_width=True)
 
 # --- CREW EXECUTION FLOW ---
 if run_button:
-    if not gemini_key or not exa_key:
-        st.error("Please provide both **Gemini API Key** and **Exa API Key** in secrets or the sidebar to proceed.")
+    if not gemini_key:
+        st.error("Please provide a valid **Gemini API Key** in the sidebar or secrets.")
     elif not user_query.strip():
         st.warning("Please enter a valid research query.")
     else:
-        # Clear previous state
         st.session_state.pop('report_txt', None)
         st.session_state.pop('execution_logs', None)
 
         os.environ["GEMINI_API_KEY"] = gemini_key
-        os.environ["EXA_API_KEY"] = exa_key
+        if exa_key:
+            os.environ["EXA_API_KEY"] = exa_key
+
         os.environ["CREWAI_TESTING"] = "true"
         os.environ["CREWAI_TRACING_ENABLED"] = "false"
 
         old_stdout = sys.stdout
         current_ctx = get_script_run_ctx()
 
-        with st.status("🤖 **Research Crew is working...**", expanded=True) as status:
+        with st.status("🤖 **Research Crew in Progress...**", expanded=True) as status:
             try:
                 st.write("📋 **Live Agent Execution Logs:**")
-                log_expander = st.expander("Show/Hide Live Agent Thoughts", expanded=True)
+                log_expander = st.expander("Show/Hide Agent Thoughts", expanded=True)
                 log_placeholder = log_expander.empty()
 
                 redirector = StreamlitLogRedirector(log_placeholder, ctx=current_ctx)
                 sys.stdout = redirector
 
-                # 1. Tools
-                st.write("🔧 Initializing Exa Search & Web Scraping tools...")
-                exa_search_tool = EXASearchTool(api_key=exa_key)
-                scrape_website_tool = ScrapeWebsiteTool()
+                # 1. Setup Custom Tools
+                active_tools = []
+                if enable_exa and exa_key:
+                    active_tools.append(EXASearchTool(api_key=exa_key))
+                if enable_scraper:
+                    active_tools.append(ScrapeWebsiteTool())
 
-                # 2. Gemini LLM
-                gemini_llm = LLM(
-                    model=modell,
+                # 2. Setup Native Gemini Grounding Tools
+                native_tools_config = []
+                if enable_google_search:
+                    native_tools_config.append({"google_search": {}})
+                if enable_code_execution:
+                    native_tools_config.append({"code_execution": {}})
+
+                model_kwargs = {"tools": native_tools_config} if native_tools_config else {}
+
+                # 3. Setup LLMs (Multi-Model Architecture)
+                reasoning_llm = LLM(
+                    model=planner_writer_model,
                     api_key=gemini_key,
-                    temperature=0.7
+                    temperature=0.7,
+                    model_kwargs=model_kwargs
                 )
 
-                # 3. Agents
-                st.write("👥 Assembling research agents (Planner, Researcher, Fact Checker, Writer)...")
+                fast_llm = LLM(
+                    model=research_checker_model,
+                    api_key=gemini_key,
+                    temperature=0.5,
+                    model_kwargs=model_kwargs
+                )
+
+                # 4. Agents Initialization
                 research_planner = Agent(
                     role="Research Planner",
-                    goal="Analyze queries and break them down into smaller, specific research topics.",
-                    backstory="You are a research strategist who excels at breaking down complex questions.",
-                    llm=gemini_llm,
+                    goal="Analyze queries and break them down into specific, structured topics.",
+                    backstory="You are an expert technical research strategist.",
+                    llm=reasoning_llm,
                     verbose=True,
                     max_rpm=150,
                     max_iter=15
@@ -289,10 +288,10 @@ if run_button:
 
                 researcher = Agent(
                     role="Internet Researcher",
-                    goal="Research thoroughly all assigned topics",
-                    backstory="You are a skilled researcher with experience in online investigation.",
-                    tools=[exa_search_tool, scrape_website_tool],
-                    llm=gemini_llm,
+                    goal="Research assigned topics thoroughly using internet tools and grounding.",
+                    backstory="You are an expert online investigator with deep analytical skills.",
+                    tools=active_tools,
+                    llm=fast_llm,
                     verbose=True,
                     max_rpm=150,
                     max_iter=15
@@ -300,10 +299,10 @@ if run_button:
 
                 fact_checker = Agent(
                     role="Fact Checker",
-                    goal="Verify data for accuracy, identify inconsistencies, and flag potential misinformation",
-                    backstory="You are a quality assurance specialist with expertise in fact-checking.",
-                    tools=[exa_search_tool, scrape_website_tool],
-                    llm=gemini_llm,
+                    goal="Verify research data, check source credibility, and correct inaccuracies.",
+                    backstory="You are a strict QA auditor specializing in technical fact verification.",
+                    tools=active_tools,
+                    llm=fast_llm,
                     verbose=True,
                     max_rpm=150,
                     max_iter=15
@@ -311,41 +310,45 @@ if run_button:
 
                 report_writer = Agent(
                     role="Report Writer",
-                    goal="Write clear, concise, and well-structured reports with mandatory headers (Summary, Insights, Citations).",
-                    backstory="You are an expert writer who specializes in creating clear, well-structured research reports.",
-                    llm=gemini_llm,
+                    goal="Synthesize verified findings into structured reports (## Summary, ## Insights, ## Citations).",
+                    backstory="You are a professional technical writer and analyst.",
+                    llm=reasoning_llm,
                     verbose=True,
                     max_rpm=150,
                     max_iter=15
                 )
 
-                # 4. Tasks
+                # 5. Build Tasks Context
+                query_payload = user_query
+                if document_context:
+                    query_payload += f"\n\n--- ATTACHED REFERENCE CONTEXT ---\n{document_context}"
+
                 create_research_plan_task = Task(
-                    description="Based on the user's query, break it down into specific topics: {user_query}",
-                    expected_output="A research plan with main research topics and key questions.",
+                    description=f"Analyze and break down this query into core topics: {query_payload}",
+                    expected_output="A structured research plan with core sub-topics and key questions.",
                     agent=research_planner,
                 )
 
                 gather_research_data_task = Task(
-                    description="Collect detailed information on all identified topics with citations.",
-                    expected_output="Comprehensive research data and source credibility notes.",
+                    description="Gather detailed data for each topic in the research plan.",
+                    expected_output="Comprehensive findings with source URLs.",
                     agent=researcher,
                 )
 
                 verify_information_quality_task = Task(
-                    description="Review collected research and verify facts against potential misinformation.",
-                    expected_output="A report with original data and verified facts.",
+                    description="Verify research findings, remove redundant info, and cross-check claims.",
+                    expected_output="Fact-checked report with validated sources.",
                     agent=fact_checker,
                 )
 
                 write_final_report_task = Task(
-                    description="Create a report using verified data. Must contain '## Summary', '## Insights', and '## Citations'.",
-                    expected_output="A final research report containing ## Summary, ## Insights, and ## Citations.",
+                    description="Draft the final structured report. MUST include '## Summary', '## Insights', and '## Citations'.",
+                    expected_output="A final markdown report containing ## Summary, ## Insights, and ## Citations.",
                     agent=report_writer,
                     guardrail=write_report_guardrail
                 )
 
-                # 5. Build and Kickoff Crew
+                # 6. Kickoff Crew
                 crew = Crew(
                     agents=[research_planner, researcher, fact_checker, report_writer],
                     tasks=[
@@ -357,9 +360,9 @@ if run_button:
                     memory=False
                 )
 
-                result = crew.kickoff(inputs={"user_query": user_query})
+                result = crew.kickoff()
 
-                # 6. Safely Extract Final Text
+                # Extract Output safely
                 report_txt = ""
                 if hasattr(result, 'raw') and result.raw:
                     report_txt = result.raw
@@ -371,36 +374,46 @@ if run_button:
                 if not report_txt:
                     report_txt = str(result)
 
-                # Save directly to file synchronously
                 with open("research_report.txt", "w", encoding="utf-8") as f:
                     f.write(report_txt)
 
-                # Store in session state for persistence
                 st.session_state['report_txt'] = report_txt
-
                 status.update(label="✅ **Research complete!**", state="complete", expanded=False)
 
             except Exception as e:
                 status.update(label="❌ **An error occurred during execution.**", state="error", expanded=True)
-                st.error(f"Error during execution: {str(e)}")
+                st.error(f"Error: {str(e)}")
             finally:
                 sys.stdout = old_stdout
 
-# --- DISPLAY LOGS & OUTPUT SECTION (PERSISTENT OUTSIDE BUTTON SCOPE) ---
-if 'execution_logs' in st.session_state:
-    with st.expander("📋 Execution Logs", expanded=False):
-        st.code(st.session_state['execution_logs'], language="bash")
-
+# --- MULTI-TAB DISPLAY SECTION ---
 if 'report_txt' in st.session_state:
     st.markdown("---")
-    st.header("📄 Final Generated Research Report")
+    
+    tab1, tab2, tab3 = st.tabs(["📄 Final Research Report", "🔗 Extracted Citations", "📋 Execution Logs"])
 
-    st.download_button(
-        label="📥 Download Report (.txt)",
-        data=st.session_state['report_txt'],
-        file_name="research_report.txt",
-        mime="text/plain",
-        use_container_width=True
-    )
+    with tab1:
+        st.download_button(
+            label="📥 Download Report (.txt)",
+            data=st.session_state['report_txt'],
+            file_name="research_report.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+        st.markdown(st.session_state['report_txt'])
 
-    st.markdown(st.session_state['report_txt'])
+    with tab2:
+        st.subheader("Extracted References & Links")
+        urls = re.findall(r'https?://[^\s\)]+', st.session_state['report_txt'])
+        if urls:
+            unique_urls = list(set(urls))
+            for index, url in enumerate(unique_urls, 1):
+                st.markdown(f"**[{index}]** [{url}]({url})")
+        else:
+            st.info("No explicit HTTP/HTTPS links extracted in the text.")
+
+    with tab3:
+        if 'execution_logs' in st.session_state:
+            st.code(st.session_state['execution_logs'], language="bash")
+
+
