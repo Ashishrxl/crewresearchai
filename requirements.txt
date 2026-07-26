@@ -1,0 +1,5 @@
+streamlit>=1.30.0
+crewai>=0.100.0
+crewai-tools>=0.30.0
+exa_py>=1.0.0
+google-genai>=0.1.0
