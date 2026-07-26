@@ -157,24 +157,15 @@ try:
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-# --- STREAMLIT PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="AI Research Crew",
-    page_icon="🤖",
-    layout="wide"
-)
-
 st.title("🤖 AI Research Crew")
 st.markdown(
     "Break down complex queries into deep research plans, gather web data, "
     "fact-check findings, and write actionable reports using **CrewAI** and **Gemini**."
 )
 
-
-
-# Retrieve keys from st.secrets if available, fallback to sidebar
-gemini_key =(st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else "")
-exa_key =  (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else "")
+# Retrieve keys from st.secrets if available, fallback to empty string
+gemini_key = (st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else "")
+exa_key = (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else "")
 
 
 # --- THREAD-SAFE STDOUT REDIRECTOR ---
@@ -192,7 +183,7 @@ class StreamlitLogRedirector(io.StringIO):
     def write(self, string):
         self.buffer += string
         clean_text = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', self.buffer)
-        
+
         if get_script_run_ctx() is None and self.ctx is not None:
             try:
                 add_script_run_ctx(ctx=self.ctx)
@@ -234,8 +225,12 @@ def write_report_guardrail(output):
     return (True, raw_output)
 
 
-# --- MAIN INPUT SECTION ---
-user_query = st.text_area("🔍 Enter your Research Query / Prompt:", height=120)
+# --- MAIN INPUT SECTION WITH SESSION STATE KEY ---
+user_query = st.text_area(
+    "🔍 Enter your Research Query / Prompt:",
+    key="user_query_input",
+    height=120
+)
 run_button = st.button("🚀 Run Research Crew", type="primary", use_container_width=True)
 
 # --- CREW EXECUTION FLOW ---
@@ -389,7 +384,7 @@ if run_button:
             finally:
                 sys.stdout = old_stdout
 
-# --- DISPLAY LOGS & OUTPUT SECTION ---
+# --- DISPLAY LOGS & OUTPUT SECTION (PERSISTENT OUTSIDE BUTTON SCOPE) ---
 if 'execution_logs' in st.session_state:
     with st.expander("📋 Execution Logs", expanded=False):
         st.code(st.session_state['execution_logs'], language="bash")
@@ -407,5 +402,3 @@ if 'report_txt' in st.session_state:
     )
 
     st.markdown(st.session_state['report_txt'])
-
-
