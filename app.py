@@ -22,17 +22,20 @@ st.set_page_config(
     layout="wide"
 )
 
-
+st.title("🤖 AI Research Crew")
 st.markdown(
     "Break down complex queries into deep research plans, gather web data, "
     "fact-check findings, and write actionable reports using **CrewAI** and **Gemini**."
 )
 
-# Retrieve keys from st.secrets if available
-gemini_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
-exa_key = st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else ""
+# --- SIDEBAR CONFIGURATION FOR KEYS ---
+st.sidebar.header("🔑 API Credentials")
+sidebar_gemini_key = st.sidebar.text_input("Gemini API Key", type="password")
+sidebar_exa_key = st.sidebar.text_input("EXA API Key", type="password")
 
-
+# Retrieve keys from st.secrets if available, fallback to sidebar
+gemini_key = sidebar_gemini_key or (st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else "")
+exa_key = sidebar_exa_key or (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else "")
 
 
 # --- GUARDRAIL FUNCTION ---
@@ -46,7 +49,7 @@ def write_report_guardrail(output):
     try:
         raw_output = output if isinstance(output, str) else output.raw
     except Exception as e:
-        return (False, f"Error retrieving the `raw` argument: {str(e)}")
+        return (False, f"Error retrieving output: {str(e)}")
 
     output_lower = raw_output.lower()
 
@@ -87,35 +90,34 @@ def save_file_hook(result):
 
 
 # --- MAIN INPUT SECTION ---
-
-user_query = st.text_area("🔍 Enter your Research Query / Prompt:",  height=120)
-
+user_query = st.text_area("🔍 Enter your Research Query / Prompt:", height=120)
 run_button = st.button("🚀 Run Research Crew", type="primary", use_container_width=True)
 
 # --- CREW EXECUTION FLOW ---
 if run_button:
     if not gemini_key or not exa_key:
-        st.error("Please provide both **Gemini API Key** and **Exa API Key** in the sidebar to proceed.")
+        st.error("Please provide both **Gemini API Key** and **Exa API Key** in secrets or the sidebar to proceed.")
     elif not user_query.strip():
         st.warning("Please enter a valid research query.")
     else:
-        # Set environment variables required by tools and CrewAI
-        os.environ["CREWAI_TESTING"] = "true"
-        os.environ["CREWAI_TRACING_ENABLED"] = "true"
+        # Set environment variables BEFORE initializing CrewAI components
         os.environ["GEMINI_API_KEY"] = gemini_key
         os.environ["EXA_API_KEY"] = exa_key
+        os.environ["CREWAI_TESTING"] = "true"
+        os.environ["CREWAI_TRACING_ENABLED"] = "true"
 
         with st.status("🤖 **Research Crew is working...**", expanded=True) as status:
             try:
                 # 1. Initialize Tools
                 st.write("🔧 Initializing Exa Search & Web Scraping tools...")
-                exa_search_tool = EXASearchTool(base_url="https://api.exa.ai")
+                exa_search_tool = EXASearchTool(api_key=exa_key)
                 scrape_website_tool = ScrapeWebsiteTool()
 
-                # 2. Initialize Gemini Model
+                # 2. Initialize Gemini Model via LiteLLM router
                 gemini_llm = LLM(
                     model="gemini/gemini-1.5-flash",
-                    api_key=gemini_key
+                    api_key=gemini_key,
+                    temperature=0.7
                 )
 
                 # 3. Initialize Agents
@@ -168,11 +170,11 @@ if run_button:
 
                 report_writer = Agent(
                     role="Report Writer",
-                    goal="Write clear, concise, and well-structured reports based on gathered information",
+                    goal="Write clear, concise, and well-structured reports with mandatory headers (Summary, Insights, Citations).",
                     backstory=(
                         "You are an expert writer who specializes in creating clear, well-structured "
                         "research reports. You synthesize complex information into readable formats and "
-                        "always include proper citations and sources."
+                        "always include proper citations and sources. You strictly format outputs with '## Summary', '## Insights', and '## Citations'."
                     ),
                     llm=gemini_llm,
                     verbose=True,
@@ -222,12 +224,10 @@ if run_button:
                 write_final_report_task = Task(
                     description=(
                         "Create a comprehensive report that answers the original query using all verified research data. "
-                        "Structure it with clear sections, include citations, and provide actionable insights."
+                        "Structure it strictly with three primary markdown headers: '## Summary', '## Insights', and '## Citations'."
                     ),
                     expected_output=(
-                        "A final research report containing: executive summary, detailed "
-                        "findings that answer the user query, supporting evidence and analysis, complete "
-                        "source citations."
+                        "A final research report containing a ## Summary, detailed ## Insights, and complete ## Citations."
                     ),
                     agent=report_writer,
                     guardrail=write_report_guardrail
