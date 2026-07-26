@@ -69,7 +69,6 @@ class StreamlitLogRedirector(io.StringIO):
         self.buffer += string
         clean_text = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', self.buffer)
         
-        # Attach parent thread context if called from a background worker thread
         if get_script_run_ctx() is None and self.ctx is not None:
             try:
                 add_script_run_ctx(ctx=self.ctx)
@@ -78,6 +77,7 @@ class StreamlitLogRedirector(io.StringIO):
 
         try:
             self.placeholder.code(clean_text, language="bash")
+            st.session_state['execution_logs'] = clean_text
         except Exception:
             pass
         return len(string)
@@ -110,27 +110,6 @@ def write_report_guardrail(output):
     return (True, raw_output)
 
 
-# --- SAVE FILE CALLBACK ---
-def save_file_hook(result):
-    try:
-        report_content = ""
-        if hasattr(result, 'raw') and result.raw:
-            report_content = result.raw
-        elif hasattr(result, 'tasks_output') and result.tasks_output:
-            for task_out in reversed(result.tasks_output):
-                if task_out and hasattr(task_out, 'raw') and task_out.raw:
-                    report_content = task_out.raw
-                    break
-
-        if not report_content:
-            report_content = str(result) if result is not None else "No output generated."
-
-        with open("research_report.txt", "w", encoding="utf-8") as f:
-            f.write(report_content)
-    except Exception as e:
-        st.error(f"Error saving report to file: {str(e)}")
-
-
 # --- MAIN INPUT SECTION ---
 user_query = st.text_area("🔍 Enter your Research Query / Prompt:", height=120)
 run_button = st.button("🚀 Run Research Crew", type="primary", use_container_width=True)
@@ -142,7 +121,10 @@ if run_button:
     elif not user_query.strip():
         st.warning("Please enter a valid research query.")
     else:
-        # Environment configuration
+        # Clear previous state
+        st.session_state.pop('report_txt', None)
+        st.session_state.pop('execution_logs', None)
+
         os.environ["GEMINI_API_KEY"] = gemini_key
         os.environ["EXA_API_KEY"] = exa_key
         os.environ["CREWAI_TESTING"] = "true"
@@ -153,36 +135,31 @@ if run_button:
 
         with st.status("🤖 **Research Crew is working...**", expanded=True) as status:
             try:
-                # Live Execution Log Container
                 st.write("📋 **Live Agent Execution Logs:**")
                 log_expander = st.expander("Show/Hide Live Agent Thoughts", expanded=True)
                 log_placeholder = log_expander.empty()
 
-                # Pass parent Streamlit ScriptRunContext to redirector
                 redirector = StreamlitLogRedirector(log_placeholder, ctx=current_ctx)
                 sys.stdout = redirector
 
-                # 1. Initialize Tools
+                # 1. Tools
                 st.write("🔧 Initializing Exa Search & Web Scraping tools...")
                 exa_search_tool = EXASearchTool(api_key=exa_key)
                 scrape_website_tool = ScrapeWebsiteTool()
 
-                # 2. Initialize Gemini Model via LiteLLM
+                # 2. Gemini LLM
                 gemini_llm = LLM(
                     model="gemini/gemini-3.5-flash-lite",
                     api_key=gemini_key,
                     temperature=0.7
                 )
 
-                # 3. Initialize Agents
+                # 3. Agents
                 st.write("👥 Assembling research agents (Planner, Researcher, Fact Checker, Writer)...")
                 research_planner = Agent(
                     role="Research Planner",
                     goal="Analyze queries and break them down into smaller, specific research topics.",
-                    backstory=(
-                        "You are a research strategist who excels at breaking down complex questions "
-                        "into manageable research components."
-                    ),
+                    backstory="You are a research strategist who excels at breaking down complex questions.",
                     llm=gemini_llm,
                     verbose=True,
                     max_rpm=150,
@@ -192,10 +169,7 @@ if run_button:
                 researcher = Agent(
                     role="Internet Researcher",
                     goal="Research thoroughly all assigned topics",
-                    backstory=(
-                        "You are a skilled researcher with experience in online investigation "
-                        "and data collection. You verify facts across multiple sources."
-                    ),
+                    backstory="You are a skilled researcher with experience in online investigation.",
                     tools=[exa_search_tool, scrape_website_tool],
                     llm=gemini_llm,
                     verbose=True,
@@ -206,10 +180,7 @@ if run_button:
                 fact_checker = Agent(
                     role="Fact Checker",
                     goal="Verify data for accuracy, identify inconsistencies, and flag potential misinformation",
-                    backstory=(
-                        "You are a quality assurance specialist with expertise in fact-checking "
-                        "and identifying misinformation and hallucinations."
-                    ),
+                    backstory="You are a quality assurance specialist with expertise in fact-checking.",
                     tools=[exa_search_tool, scrape_website_tool],
                     llm=gemini_llm,
                     verbose=True,
@@ -220,10 +191,7 @@ if run_button:
                 report_writer = Agent(
                     role="Report Writer",
                     goal="Write clear, concise, and well-structured reports with mandatory headers (Summary, Insights, Citations).",
-                    backstory=(
-                        "You are an expert writer who specializes in creating clear, well-structured "
-                        "research reports. You strictly format outputs with '## Summary', '## Insights', and '## Citations'."
-                    ),
+                    backstory="You are an expert writer who specializes in creating clear, well-structured research reports.",
                     llm=gemini_llm,
                     verbose=True,
                     max_rpm=150,
@@ -265,15 +233,12 @@ if run_button:
                         verify_information_quality_task,
                         write_final_report_task
                     ],
-                    memory=False,
-                    after_kickoff_callbacks=[save_file_hook]
+                    memory=False
                 )
 
                 result = crew.kickoff(inputs={"user_query": user_query})
 
-                status.update(label="✅ **Research complete!**", state="complete", expanded=False)
-
-                # 6. Extract Result
+                # 6. Safely Extract Final Text
                 report_txt = ""
                 if hasattr(result, 'raw') and result.raw:
                     report_txt = result.raw
@@ -285,7 +250,14 @@ if run_button:
                 if not report_txt:
                     report_txt = str(result)
 
+                # Save directly to file synchronously
+                with open("research_report.txt", "w", encoding="utf-8") as f:
+                    f.write(report_txt)
+
+                # Store in session state for persistence
                 st.session_state['report_txt'] = report_txt
+
+                status.update(label="✅ **Research complete!**", state="complete", expanded=False)
 
             except Exception as e:
                 status.update(label="❌ **An error occurred during execution.**", state="error", expanded=True)
@@ -293,7 +265,11 @@ if run_button:
             finally:
                 sys.stdout = old_stdout
 
-# --- DISPLAY OUTPUT SECTION ---
+# --- DISPLAY LOGS & OUTPUT SECTION ---
+if 'execution_logs' in st.session_state:
+    with st.expander("📋 Execution Logs", expanded=False):
+        st.code(st.session_state['execution_logs'], language="bash")
+
 if 'report_txt' in st.session_state:
     st.markdown("---")
     st.header("📄 Final Generated Research Report")
@@ -308,5 +284,4 @@ if 'report_txt' in st.session_state:
 
     st.markdown(st.session_state['report_txt'])
 
-# --- TIMESTAMP ---
-# July 26, 2026, 2:27 PM IST
+July 26, 2026, 2:40 PM IST
