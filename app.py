@@ -145,7 +145,7 @@ if run_button:
 
                 # 2. Initialize Gemini Model via LiteLLM router
                 gemini_llm = LLM(
-                    model="gemini/gemini-1.5-flash",
+                    model="gemini/gemini-3.5-flash-lite",
                     api_key=gemini_key,
                     temperature=0.7
                 )
