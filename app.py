@@ -112,13 +112,13 @@ except RuntimeError:
 st.title("⚙️ Crew Configuration")
 
 # API Keys Configuration
-gemini_key = st.sidebar.text_input("Gemini API Key", value=st.secrets.get("GEMINI_API_KEY", ""), type="password")
-exa_key = st.sidebar.text_input("Exa API Key", value=st.secrets.get("EXA_API_KEY", ""), type="password")
+gemini_key = st.text_input("Gemini API Key", value=st.secrets.get("GEMINI_API_KEY", ""), type="password")
+exa_key = st.text_input("Exa API Key", value=st.secrets.get("EXA_API_KEY", ""), type="password")
 
 st.markdown("---")
 st.subheader("🛠️ Active Tools")
-enable_exa = st.sidebar.checkbox("Enable Exa Search Tool", value=True)
-enable_scraper = st.sidebar.checkbox("Enable Web Scraper Tool", value=True)
+enable_exa = st.checkbox("Enable Exa Search Tool", value=True)
+enable_scraper = st.checkbox("Enable Web Scraper Tool", value=True)
 
 st.markdown("---")
 st.subheader("🌐 Native Gemini Grounding")
@@ -132,7 +132,7 @@ planner_writer_model = st.selectbox(
     ["gemini/gemini-2.5-pro", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite"],
     index=1
 )
-research_checker_model = st.sidebar.selectbox(
+research_checker_model = st.selectbox(
     "Researcher & Checker Model",
     ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash"],
     index=0
@@ -204,7 +204,7 @@ with col1:
     )
 
 with col2:
-    uploaded_file = st.file_uploader("📄 Attach Reference Document (Optional)", type=["txt", "md"])
+    uploaded_file = st.file_uploader("📄 Attach Reference Document (Optional)", type=["txt", "md","pdf"])
     document_context = ""
     if uploaded_file is not None:
         try:
