@@ -227,7 +227,7 @@ def write_report_guardrail(output):
 
 # --- MAIN INPUT SECTION WITH SESSION STATE KEY ---
 user_query = st.text_area(
-    "🔍 Enter your Research Query / Prompt:",
+    "🔍 Enter your Research Query",
     key="user_query_input",
     height=120
 )
