@@ -109,7 +109,7 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 
-st.expander("Crew configuration", expanded=True)
+with st.expander("Crew configuration"):
 
 
 # API Keys Configuration
