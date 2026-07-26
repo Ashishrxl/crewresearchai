@@ -6,12 +6,20 @@ import warnings
 import logging
 import asyncio
 import streamlit as st
-from streamlit.runtime.scriptrunner_utils.script_run_context import add_script_run_ctx, get_script_run_ctx
+
+# Safe import for Streamlit script context across all Streamlit versions
+try:
+    from streamlit.runtime.scriptrunner_utils.script_run_context import add_script_run_ctx, get_script_run_ctx
+except ImportError:
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    except ImportError:
+        from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from crewai import Agent, Task, Crew, LLM
 from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
-# --- 1. SUPPRESS STREAMLIT THREAD CONTEXT WARNINGS ---
+# --- SUPPRESS THREAD WARNING LOGS ---
 logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
 logging.getLogger("streamlit.runtime.state.session_state_proxy").setLevel(logging.ERROR)
 warnings.filterwarnings('ignore')
@@ -49,7 +57,7 @@ exa_key = sidebar_exa_key or (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY"
 class StreamlitLogRedirector(io.StringIO):
     """
     Thread-safe stream redirector that captures CrewAI terminal output 
-    without breaking runtime listeners or raising ScriptRunContext warnings.
+    without breaking runtime listeners or raising ScriptRunContext errors.
     """
     def __init__(self, placeholder, ctx):
         super().__init__()
@@ -61,14 +69,17 @@ class StreamlitLogRedirector(io.StringIO):
         self.buffer += string
         clean_text = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', self.buffer)
         
-        # Attach context if writing from a worker thread
+        # Attach parent thread context if called from a background worker thread
         if get_script_run_ctx() is None and self.ctx is not None:
-            add_script_run_context(ctx=self.ctx)
+            try:
+                add_script_run_ctx(ctx=self.ctx)
+            except Exception:
+                pass
 
         try:
             self.placeholder.code(clean_text, language="bash")
         except Exception:
-            pass  # Suppress remaining thread boundary edge cases
+            pass
         return len(string)
 
     def flush(self):
@@ -296,3 +307,6 @@ if 'report_txt' in st.session_state:
     )
 
     st.markdown(st.session_state['report_txt'])
+
+# --- TIMESTAMP ---
+# July 26, 2026, 2:27 PM IST
