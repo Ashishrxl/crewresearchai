@@ -178,7 +178,7 @@ with st.expander("Crew configuration"):
     )
     research_checker_model = st.selectbox(
         "Researcher & Checker Model",
-        ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite"],
+        ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-2.5-flash-lite"],
         index=0
     )
 
