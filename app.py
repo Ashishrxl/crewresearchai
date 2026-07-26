@@ -6,7 +6,8 @@ import warnings
 import logging
 import asyncio
 import streamlit as st
-from streamlit.runtime.scriptrunner import add_script_run_context, get_script_run_ctx
+from streamlit.runtime.scriptrunner_utils.script_run_context import add_script_run_ctx, get_script_run_ctx
+
 from crewai import Agent, Task, Crew, LLM
 from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
