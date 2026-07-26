@@ -263,7 +263,7 @@ if run_button:
             os.environ["EXA_API_KEY"] = exa_key
 
         os.environ["CREWAI_TESTING"] = "true"
-        os.environ["CREWAI_TRACING_ENABLED"] = "false"
+        os.environ["CREWAI_TRACING_ENABLED"] = "true"
 
         old_stdout = sys.stdout
         current_ctx = get_script_run_ctx()
@@ -318,7 +318,7 @@ if run_button:
                     backstory="You are an expert technical research strategist.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True
+                    verbose=True, max_rpm=2, max_iter=2
                 )
 
                 researcher = Agent(
@@ -328,7 +328,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True
+                    verbose=True,max_rpm=2, max_iter=2
                 )
 
                 fact_checker = Agent(
@@ -338,7 +338,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True
+                    verbose=True, max_rpm=2, max_iter=2
                 )
 
                 report_writer = Agent(
@@ -347,7 +347,7 @@ if run_button:
                     backstory="You are a professional technical writer and analyst.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True
+                    verbose=True, max_rpm=2, max_iter=2
                 )
 
                 # 4. Build Tasks
