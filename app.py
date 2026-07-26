@@ -87,8 +87,8 @@ def save_file_hook(result):
 
 
 # --- MAIN INPUT SECTION ---
-default_query = "analyse current market trends in ai apps for a developer perspectives and suggest 5 ai apps to build in this time to success in current time"
-user_query = st.text_area("🔍 Enter your Research Query / Prompt:", value=default_query, height=120)
+
+user_query = st.text_area("🔍 Enter your Research Query / Prompt:",  height=120)
 
 run_button = st.button("🚀 Run Research Crew", type="primary", use_container_width=True)
 
