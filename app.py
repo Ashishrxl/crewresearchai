@@ -112,8 +112,8 @@ except RuntimeError:
 st.title("⚙️ Crew Configuration")
 
 # API Keys Configuration
-gemini_key = st.text_input("Gemini API Key", value=st.secrets.get("GEMINI_API_KEY", ""), type="password")
-exa_key = st.text_input("Exa API Key", value=st.secrets.get("EXA_API_KEY", ""), type="password")
+gemini_key = st.secrets.get("GEMINI_API_KEY")
+exa_key = st.secrets.get("EXA_API_KEY")
 
 st.markdown("---")
 st.subheader("🛠️ Active Tools")
