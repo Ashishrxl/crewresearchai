@@ -22,7 +22,7 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🤖 Autonomous AI Market & Trend Research Crew")
+
 st.markdown(
     "Break down complex queries into deep research plans, gather web data, "
     "fact-check findings, and write actionable reports using **CrewAI** and **Gemini**."
@@ -32,13 +32,7 @@ st.markdown(
 gemini_key = st.secrets.get("GEMINI_API_KEY", "") if "GEMINI_API_KEY" in st.secrets else ""
 exa_key = st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else ""
 
-# Sidebar input fallback
-with st.sidebar:
-    st.header("🔑 API Credentials")
-    if not gemini_key:
-        gemini_key = st.text_input("Gemini API Key", type="password")
-    if not exa_key:
-        exa_key = st.text_input("Exa API Key", type="password")
+
 
 
 # --- GUARDRAIL FUNCTION ---
