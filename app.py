@@ -5,8 +5,15 @@ import io
 import warnings
 import logging
 import asyncio
+from typing import Any, List, Dict, Union
 import streamlit as st
 from streamlit.components.v1 import html
+
+# Try importing PyPDF for PDF document parsing
+try:
+    import pypdf
+except ImportError:
+    pypdf = None
 
 # --- Hide Streamlit Branding ---
 html("""
@@ -97,6 +104,44 @@ except ImportError:
 from crewai import Agent, Task, Crew, LLM
 from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
+# --- CUSTOM GROUNDED GEMINI LLM WRAPPER ---
+class GroundedGeminiLLM(LLM):
+    """
+    Custom CrewAI LLM wrapper that explicitly injects Gemini Native 
+    Google Search Grounding into every API call payload.
+    """
+    def __init__(self, model: str, api_key: str, enable_search: bool = True, **kwargs):
+        super().__init__(model=model, api_key=api_key, **kwargs)
+        self.enable_search = enable_search
+
+    def call(
+        self,
+        messages: Union[str, List[Dict[str, str]]],
+        tools: List[Dict] | None = None,
+        callbacks: List[Any] | None = None,
+        available_functions: Dict[str, Any] | None = None,
+        **kwargs,
+    ) -> Union[str, Any]:
+        
+        if tools is None:
+            tools = []
+
+        # Explicitly inject Gemini camelCase googleSearch grounding tool
+        if self.enable_search:
+            search_tool_exists = any("googleSearch" in t or "google_search" in t for t in tools)
+            if not search_tool_exists:
+                tools.insert(0, {"googleSearch": {}})
+
+        kwargs["web_search_options"] = {"enable": self.enable_search}
+
+        return super().call(
+            messages=messages,
+            tools=tools,
+            callbacks=callbacks,
+            available_functions=available_functions,
+            **kwargs
+        )
+
 # --- SUPPRESS THREAD WARNING LOGS ---
 logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
 logging.getLogger("streamlit.runtime.state.session_state_proxy").setLevel(logging.ERROR)
@@ -110,9 +155,7 @@ except RuntimeError:
 
 
 with st.expander("Crew configuration"):
-
-
-# API Keys Configuration
+    # API Keys Configuration
     gemini_key = st.secrets.get("GEMINI_API_KEY")
     exa_key = st.secrets.get("EXA_API_KEY")
 
@@ -129,15 +172,15 @@ with st.expander("Crew configuration"):
     st.markdown("---")
     st.subheader("🧠 Multi-Model Assignment")
     planner_writer_model = st.selectbox(
-    "Planner & Writer Model",
-    ["gemini/gemini-2.5-pro", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash-lite"],
-    index=1
-)
+        "Planner & Writer Model",
+        ["gemini/gemini-2.5-pro", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash-lite"],
+        index=1
+    )
     research_checker_model = st.selectbox(
-    "Researcher & Checker Model",
-    ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite"],
-    index=0
-)
+        "Researcher & Checker Model",
+        ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite"],
+        index=0
+    )
 
 # --- THREAD-SAFE STDOUT REDIRECTOR ---
 class StreamlitLogRedirector(io.StringIO):
@@ -205,12 +248,22 @@ with col1:
     )
 
 with col2:
-    uploaded_file = st.file_uploader("📄 Attach Reference Document (Optional)", type=["txt", "md","pdf"])
+    uploaded_file = st.file_uploader("📄 Attach Reference Document (Optional)", type=["txt", "md", "pdf"])
     document_context = ""
     if uploaded_file is not None:
         try:
-            document_context = uploaded_file.read().decode("utf-8")
-            st.success(f"Attached: {uploaded_file.name}")
+            if uploaded_file.name.endswith('.pdf'):
+                if pypdf is not None:
+                    pdf_reader = pypdf.PdfReader(uploaded_file)
+                    for page in pdf_reader.pages:
+                        document_context += page.extract_text() or ""
+                else:
+                    st.error("pypdf is required to read PDF files. Please add `pypdf` to requirements.txt.")
+            else:
+                document_context = uploaded_file.read().decode("utf-8")
+            
+            if document_context:
+                st.success(f"Attached: {uploaded_file.name}")
         except Exception as e:
             st.error(f"Error reading file: {e}")
 
@@ -219,7 +272,7 @@ run_button = st.button("🚀 Run Research Crew", type="primary", use_container_w
 # --- CREW EXECUTION FLOW ---
 if run_button:
     if not gemini_key:
-        st.error("Please provide a valid **Gemini API Key** in the sidebar or secrets.")
+        st.error("Please provide a valid **GEMINI_API_KEY** in your Streamlit secrets.")
     elif not user_query.strip():
         st.warning("Please enter a valid research query.")
     else:
@@ -245,38 +298,29 @@ if run_button:
                 redirector = StreamlitLogRedirector(log_placeholder, ctx=current_ctx)
                 sys.stdout = redirector
 
-                # 1. Setup Custom Tools
+                # 1. Setup Custom CrewAI Tools
                 active_tools = []
                 if enable_exa and exa_key:
                     active_tools.append(EXASearchTool(api_key=exa_key))
                 if enable_scraper:
                     active_tools.append(ScrapeWebsiteTool())
 
-                # 2. Setup Native Gemini Grounding Tools
-                native_tools_config = []
-                if enable_google_search:
-                    native_tools_config.append({"google_search": {}})
-                if enable_code_execution:
-                    native_tools_config.append({"code_execution": {}})
-
-                model_kwargs = {"tools": native_tools_config} if native_tools_config else {}
-
-                # 3. Setup LLMs (Multi-Model Architecture)
-                reasoning_llm = LLM(
+                # 2. Setup Native Gemini Grounding via GroundedGeminiLLM
+                reasoning_llm = GroundedGeminiLLM(
                     model=planner_writer_model,
                     api_key=gemini_key,
-                    temperature=0.7,
-                    model_kwargs=model_kwargs
+                    enable_search=enable_google_search,
+                    temperature=0.7
                 )
 
-                fast_llm = LLM(
+                fast_llm = GroundedGeminiLLM(
                     model=research_checker_model,
                     api_key=gemini_key,
-                    temperature=0.5,
-                    model_kwargs=model_kwargs
+                    enable_search=enable_google_search,
+                    temperature=0.5
                 )
 
-                # 4. Agents Initialization
+                # 3. Agents Initialization
                 research_planner = Agent(
                     role="Research Planner",
                     goal="Analyze queries and break them down into specific, structured topics.",
@@ -319,7 +363,7 @@ if run_button:
                     max_iter=15
                 )
 
-                # 5. Build Tasks Context
+                # 4. Build Tasks Context
                 query_payload = user_query
                 if document_context:
                     query_payload += f"\n\n--- ATTACHED REFERENCE CONTEXT ---\n{document_context}"
@@ -349,7 +393,7 @@ if run_button:
                     guardrail=write_report_guardrail
                 )
 
-                # 6. Kickoff Crew
+                # 5. Kickoff Crew
                 crew = Crew(
                     agents=[research_planner, researcher, fact_checker, report_writer],
                     tasks=[
@@ -390,7 +434,7 @@ if run_button:
 # --- MULTI-TAB DISPLAY SECTION ---
 if 'report_txt' in st.session_state:
     st.markdown("---")
-    
+
     tab1, tab2, tab3 = st.tabs(["📄 Final Research Report", "🔗 Extracted Citations", "📋 Execution Logs"])
 
     with tab1:
@@ -416,5 +460,3 @@ if 'report_txt' in st.session_state:
     with tab3:
         if 'execution_logs' in st.session_state:
             st.code(st.session_state['execution_logs'], language="bash")
-
-
