@@ -1,5 +1,7 @@
 import os
 import re
+import sys
+import io
 import warnings
 import asyncio
 import streamlit as st
@@ -38,6 +40,24 @@ gemini_key = sidebar_gemini_key or (st.secrets.get("GEMINI_API_KEY", "") if "GEM
 exa_key = sidebar_exa_key or (st.secrets.get("EXA_API_KEY", "") if "EXA_API_KEY" in st.secrets else "")
 
 
+# --- STDOUT REDIRECTOR FOR STREAMLIT UI LOGGING ---
+class StreamlitLogRedirector(io.StringIO):
+    """
+    Redirects stdout logs to a Streamlit empty placeholder in real-time.
+    """
+    def __init__(self, placeholder):
+        super().__init__()
+        self.placeholder = placeholder
+        self.buffer = ""
+
+    def write(self, string):
+        self.buffer += string
+        # Clean ANSI escape sequences from Agent terminal prints
+        clean_text = re.sub(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])', '', self.buffer)
+        self.placeholder.code(clean_text, language="bash")
+        return len(string)
+
+
 # --- GUARDRAIL FUNCTION ---
 def write_report_guardrail(output):
     """
@@ -68,7 +88,7 @@ def write_report_guardrail(output):
 # --- SAVE FILE CALLBACK ---
 def save_file_hook(result):
     """
-    Saves the final report content cleanly to a local markdown file.
+    Saves the final report content cleanly to a local text file (.txt).
     """
     try:
         report_content = ""
@@ -83,7 +103,7 @@ def save_file_hook(result):
         if not report_content:
             report_content = str(result) if result is not None else "No output generated."
 
-        with open("research_report.md", "w", encoding="utf-8") as f:
+        with open("research_report.txt", "w", encoding="utf-8") as f:
             f.write(report_content)
     except Exception as e:
         st.error(f"Error saving report to file: {str(e)}")
@@ -108,6 +128,16 @@ if run_button:
 
         with st.status("🤖 **Research Crew is working...**", expanded=True) as status:
             try:
+                # Setup live execution log container in Streamlit UI
+                st.write("📋 **Live Agent Execution Logs:**")
+                log_expander = st.expander("Show/Hide Live Agent Thoughts", expanded=True)
+                log_placeholder = log_expander.empty()
+
+                # Redirect stdout to Streamlit UI placeholder
+                old_stdout = sys.stdout
+                redirector = StreamlitLogRedirector(log_placeholder)
+                sys.stdout = redirector
+
                 # 1. Initialize Tools
                 st.write("🔧 Initializing Exa Search & Web Scraping tools...")
                 exa_search_tool = EXASearchTool(api_key=exa_key)
@@ -115,7 +145,7 @@ if run_button:
 
                 # 2. Initialize Gemini Model via LiteLLM router
                 gemini_llm = LLM(
-                    model="gemini/gemini-3.5-flash-lite",
+                    model="gemini/gemini-1.5-flash",
                     api_key=gemini_key,
                     temperature=0.7
                 )
@@ -249,31 +279,45 @@ if run_button:
 
                 result = crew.kickoff(inputs={"user_query": user_query})
 
+                # Restore standard output
+                sys.stdout = old_stdout
+
                 status.update(label="✅ **Research complete!**", state="complete", expanded=False)
 
-                # 6. Extract Output Content
-                report_md = result.raw if hasattr(result, 'raw') and result.raw else str(result)
+                # 6. Extract Output Content cleanly
+                report_txt = ""
+                if hasattr(result, 'raw') and result.raw:
+                    report_txt = result.raw
+                elif hasattr(result, 'tasks_output') and result.tasks_output:
+                    for task_out in reversed(result.tasks_output):
+                        if task_out and hasattr(task_out, 'raw') and task_out.raw:
+                            report_txt = task_out.raw
+                            break
+                if not report_txt:
+                    report_txt = str(result)
 
                 # Store in session state for persistence
-                st.session_state['report_md'] = report_md
+                st.session_state['report_txt'] = report_txt
 
             except Exception as e:
+                sys.stdout = sys.__stdout__
                 status.update(label="❌ **An error occurred during execution.**", state="error", expanded=True)
                 st.error(f"Error during execution: {str(e)}")
 
 # --- DISPLAY OUTPUT SECTION ---
-if 'report_md' in st.session_state:
+if 'report_txt' in st.session_state:
     st.markdown("---")
     st.header("📄 Final Generated Research Report")
 
-    # Download Button
+    # Download Button (.txt)
     st.download_button(
-        label="📥 Download Report (.md)",
-        data=st.session_state['report_md'],
-        file_name="research_report.md",
-        mime="text/markdown",
+        label="📥 Download Report (.txt)",
+        data=st.session_state['report_txt'],
+        file_name="research_report.txt",
+        mime="text/plain",
         use_container_width=True
     )
 
-    # Render Report Content
-    st.markdown(st.session_state['report_md'])
+    # Render Report Content in UI
+    st.markdown(st.session_state['report_txt'])
+
