@@ -130,12 +130,12 @@ with st.expander("Crew configuration"):
     st.subheader("🧠 Multi-Model Assignment")
     planner_writer_model = st.selectbox(
     "Planner & Writer Model",
-    ["gemini/gemini-2.5-pro", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite"],
+    ["gemini/gemini-2.5-pro", "gemini/gemini-3.5-flash", "gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash-lite"],
     index=1
 )
     research_checker_model = st.selectbox(
     "Researcher & Checker Model",
-    ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash"],
+    ["gemini/gemini-3.1-flash-lite", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite"],
     index=0
 )
 
