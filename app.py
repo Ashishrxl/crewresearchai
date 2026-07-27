@@ -153,12 +153,12 @@ with st.expander("🛠️ Tool & Model Selection Configuration"):
     st.subheader("🧠 Multi-Model Assignment")
     planner_writer_model = st.selectbox(
         "Planner & Writer Model",
-        ["gemini/gemini-2.5-flash", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-3.1-flash-lite", "gemini/gemini-2.5-flash-lite", "gemini/gemini-flash-latest", "gemini/gemini-flash-lite-latest", "gemini/gemini-3-flash-preview", "gemini/gemini-3.1-flash-lite-preview", "gemini/gemini-3.6-flash"],
+        ["gemini/gemini-2.5-flash", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-3.1-flash-lite", "gemini/gemini-2.5-flash-lite", "gemini/gemini-3-flash-preview", "gemini/gemini-3.1-flash-lite-preview", "gemini/gemini-3.6-flash"],
         index=1
     )
     research_checker_model = st.selectbox(
         "Researcher & Checker Model",
-        ["gemini/gemini-2.5-flash", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-3.1-flash-lite", "gemini/gemini-2.5-flash-lite", "gemini/gemini-flash-latest", "gemini/gemini-flash-lite-latest", "gemini/gemini-3-flash-preview", "gemini/gemini-3.1-flash-lite-preview", "gemini/gemini-3.6-flash"],
+        ["gemini/gemini-2.5-flash", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-3.1-flash-lite", "gemini/gemini-2.5-flash-lite", "gemini/gemini-3-flash-preview", "gemini/gemini-3.1-flash-lite-preview", "gemini/gemini-3.6-flash"],
         index=0
     )
 
