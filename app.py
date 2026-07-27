@@ -5,6 +5,8 @@ import io
 import warnings
 import logging
 import asyncio
+import itertools
+import threading
 from typing import Any, List, Dict, Union
 import streamlit as st
 
@@ -76,7 +78,52 @@ except ImportError:
 from crewai import Agent, Task, Crew, LLM
 from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
-# --- CUSTOM GEMINI GROUNDING LLM WRAPPER ---
+# --- API KEYS ROTATION CONFIGURATION ---
+api_keys_raw = {
+    "Key 1": st.secrets.get("KEY_1"),
+    "Key 2": st.secrets.get("KEY_2"),
+    "Key 3": st.secrets.get("KEY_3"),
+    "Key 4": st.secrets.get("KEY_4"),
+    "Key 5": st.secrets.get("KEY_5"),
+    "Key 6": st.secrets.get("KEY_6"),
+    "Key 7": st.secrets.get("KEY_7"),
+    "Key 8": st.secrets.get("KEY_8"),
+    "Key 9": st.secrets.get("KEY_9"),
+    "Key 10": st.secrets.get("KEY_10"),
+    "Key 11": st.secrets.get("KEY_11")
+}
+
+# Filter out missing/empty keys
+available_api_keys = [k for k in api_keys_raw.values() if k]
+if not available_api_keys and st.secrets.get("GEMINI_API_KEY"):
+    available_api_keys.append(st.secrets.get("GEMINI_API_KEY"))
+
+class KeyRotator:
+    """Thread-safe API Key Manager that automatically rotates keys upon failures."""
+    def __init__(self, keys: List[str]):
+        self.keys = keys
+        self.lock = threading.Lock()
+        self.index = 0
+
+    def get_current_key(self) -> str:
+        with self.lock:
+            if not self.keys:
+                return ""
+            return self.keys[self.index]
+
+    def rotate_key(self) -> str:
+        with self.lock:
+            if not self.keys:
+                return ""
+            self.index = (self.index + 1) % len(self.keys)
+            new_key = self.keys[self.index]
+            os.environ["GEMINI_API_KEY"] = new_key
+            return new_key
+
+# Global rotator instance
+rotator = KeyRotator(available_api_keys)
+
+# --- CUSTOM ROTATING GEMINI LLMs ---
 class GroundedGeminiLLM(LLM):
     def __init__(self, model: str, api_key: str, enable_search: bool = True, **kwargs):
         super().__init__(model=model, api_key=api_key, **kwargs)
@@ -99,24 +146,75 @@ class GroundedGeminiLLM(LLM):
             if not search_tool_exists:
                 tools.insert(0, {"googleSearch": {}})
 
-        try:
-            response = super().call(
-                messages=messages,
-                tools=tools,
-                callbacks=callbacks,
-                available_functions=available_functions,
-                **kwargs
-            )
-        except Exception as err:
-            # Handle empty response exceptions from LLM execution during function calls
-            if "None or empty" in str(err) or "Invalid response" in str(err):
-                return "Step processed and information captured successfully."
-            raise err
+        max_retries = max(1, len(rotator.keys))
+        last_error = None
 
-        if not response or (isinstance(response, str) and not response.strip()):
-            return "Completed with available information."
+        for attempt in range(max_retries):
+            try:
+                # Update key dynamically
+                self.api_key = rotator.get_current_key()
+                os.environ["GEMINI_API_KEY"] = self.api_key
 
-        return response
+                response = super().call(
+                    messages=messages,
+                    tools=tools,
+                    callbacks=callbacks,
+                    available_functions=available_functions,
+                    **kwargs
+                )
+
+                if not response or (isinstance(response, str) and not response.strip()):
+                    return "Completed with available information."
+
+                return response
+
+            except Exception as err:
+                last_error = err
+                err_str = str(err)
+
+                # Graceful handling for LLM tool call response issues
+                if "None or empty" in err_str or "Invalid response" in err_str:
+                    return "Step processed and information captured successfully."
+
+                # Rotate to the next API key upon limit or execution error
+                new_key = rotator.rotate_key()
+                sys.stdout.write(f"\n⚠️ API Call failed ({err_str[:80]}...). Rotating to next API key...\n")
+
+        raise last_error or Exception("All API keys failed execution.")
+
+
+class RotatingLLM(LLM):
+    """Standard CrewAI LLM wrapped with Key Rotation capabilities."""
+    def call(
+        self,
+        messages: Union[str, List[Dict[str, str]]],
+        tools: List[Dict] | None = None,
+        callbacks: List[Any] | None = None,
+        available_functions: Dict[str, Any] | None = None,
+        **kwargs,
+    ) -> Union[str, Any]:
+
+        max_retries = max(1, len(rotator.keys))
+        last_error = None
+
+        for attempt in range(max_retries):
+            try:
+                self.api_key = rotator.get_current_key()
+                os.environ["GEMINI_API_KEY"] = self.api_key
+
+                return super().call(
+                    messages=messages,
+                    tools=tools,
+                    callbacks=callbacks,
+                    available_functions=available_functions,
+                    **kwargs
+                )
+            except Exception as err:
+                last_error = err
+                rotator.rotate_key()
+                sys.stdout.write(f"\n⚠️ API Call failed. Rotating to next API key...\n")
+
+        raise last_error or Exception("All API keys failed execution.")
 
 # --- SUPPRESS LOGS & FIX ASYNCIO ---
 logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
@@ -130,8 +228,9 @@ except RuntimeError:
 
 # --- CREW CONFIGURATION SIDEBAR/EXPANDER ---
 with st.expander("🛠️ Tool & Model Selection Configuration"):
-    gemini_key = st.secrets.get("GEMINI_API_KEY")
     exa_key = st.secrets.get("EXA_API_KEY")
+
+    st.write(f"🔑 **Configured API Keys Loaded:** `{len(available_api_keys)} Active Key(s)`")
 
     # Mode Selector for clear separation
     search_mode = st.radio(
@@ -250,15 +349,17 @@ run_button = st.button("🚀 Run Research Crew", type="primary", use_container_w
 
 # --- CREW EXECUTION ---
 if run_button:
-    if not gemini_key:
-        st.error("Please provide a valid **GEMINI_API_KEY** in your Streamlit secrets.")
+    if not available_api_keys:
+        st.error("Please provide at least one valid Gemini API Key (`KEY_1`, `KEY_2`, etc.) in your Streamlit secrets.")
     elif not user_query.strip():
         st.warning("Please enter a valid research query.")
     else:
         st.session_state.pop('report_txt', None)
         st.session_state.pop('execution_logs', None)
 
-        os.environ["GEMINI_API_KEY"] = gemini_key
+        current_key = rotator.get_current_key()
+        os.environ["GEMINI_API_KEY"] = current_key
+
         if exa_key:
             os.environ["EXA_API_KEY"] = exa_key
 
@@ -289,25 +390,25 @@ if run_button:
                 if enable_google_search:
                     reasoning_llm = GroundedGeminiLLM(
                         model=planner_writer_model,
-                        api_key=gemini_key,
+                        api_key=rotator.get_current_key(),
                         enable_search=True,
                         temperature=0.7
                     )
                     fast_llm = GroundedGeminiLLM(
                         model=research_checker_model,
-                        api_key=gemini_key,
+                        api_key=rotator.get_current_key(),
                         enable_search=True,
                         temperature=0.5
                     )
                 else:
-                    reasoning_llm = LLM(
+                    reasoning_llm = RotatingLLM(
                         model=planner_writer_model,
-                        api_key=gemini_key,
+                        api_key=rotator.get_current_key(),
                         temperature=0.7
                     )
-                    fast_llm = LLM(
+                    fast_llm = RotatingLLM(
                         model=research_checker_model,
-                        api_key=gemini_key,
+                        api_key=rotator.get_current_key(),
                         temperature=0.5
                     )
 
@@ -328,7 +429,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True,max_rpm=5, max_iter=2
+                    verbose=True, max_rpm=5, max_iter=2
                 )
 
                 fact_checker = Agent(
