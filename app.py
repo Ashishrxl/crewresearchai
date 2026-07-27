@@ -2,10 +2,10 @@ import os
 import re
 import sys
 import io
+import time
 import warnings
 import logging
 import asyncio
-import itertools
 import threading
 from typing import Any, List, Dict, Union
 import streamlit as st
@@ -15,6 +15,9 @@ try:
     import pypdf
 except ImportError:
     pypdf = None
+
+# Import LiteLLM to patch completion calls globally for CrewAI
+import litellm
 
 # --- Page Configuration ---
 st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="wide")
@@ -93,13 +96,13 @@ api_keys_raw = {
     "Key 11": st.secrets.get("KEY_11")
 }
 
-# Filter out missing/empty keys
-available_api_keys = [k for k in api_keys_raw.values() if k]
+# Collect non-empty keys
+available_api_keys = [k for k in api_keys_raw.values() if k and k.strip()]
 if not available_api_keys and st.secrets.get("GEMINI_API_KEY"):
     available_api_keys.append(st.secrets.get("GEMINI_API_KEY"))
 
 class KeyRotator:
-    """Thread-safe API Key Manager that automatically rotates keys upon failures."""
+    """Thread-safe API Key Rotator"""
     def __init__(self, keys: List[str]):
         self.keys = keys
         self.lock = threading.Lock()
@@ -115,15 +118,48 @@ class KeyRotator:
         with self.lock:
             if not self.keys:
                 return ""
+            old_idx = self.index
             self.index = (self.index + 1) % len(self.keys)
             new_key = self.keys[self.index]
+            
+            # Apply key across environment variables
             os.environ["GEMINI_API_KEY"] = new_key
+            os.environ["GEMINI_KEY"] = new_key
+            litellm.api_key = new_key
+            
+            sys.stdout.write(f"\n🔄 [KEY ROTATION] Switched from Key #{old_idx + 1} to Key #{self.index + 1}\n")
             return new_key
 
-# Global rotator instance
 rotator = KeyRotator(available_api_keys)
 
-# --- CUSTOM ROTATING GEMINI LLMs ---
+# --- PATCH LITELLM COMPLETION FOR AUTOMATIC RETRY & ROTATION ---
+_original_litellm_completion = litellm.completion
+
+def auto_rotating_litellm_completion(*args, **kwargs):
+    """Wrapper that catches 429/ResourceExhausted errors and rotates API key automatically."""
+    max_attempts = max(10, len(rotator.keys) * 3)
+    
+    for attempt in range(max_attempts):
+        current_key = rotator.get_current_key()
+        kwargs["api_key"] = current_key
+        os.environ["GEMINI_API_KEY"] = current_key
+        
+        try:
+            return _original_litellm_completion(*args, **kwargs)
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "429" in err_msg or "resource_exhausted" in err_msg or "rate" in err_msg or "quota" in err_msg:
+                sys.stdout.write(f"\n⚠️ Rate limit hit (429/RESOURCE_EXHAUSTED). Rotating key and retrying...\n")
+                rotator.rotate_key()
+                time.sleep(2)  # Short delay before retry
+            else:
+                raise e
+    raise Exception("All API keys exhausted or failed max retry attempts.")
+
+# Override litellm completion globally
+litellm.completion = auto_rotating_litellm_completion
+
+# --- CUSTOM GROUNDED GEMINI LLM WRAPPER ---
 class GroundedGeminiLLM(LLM):
     def __init__(self, model: str, api_key: str, enable_search: bool = True, **kwargs):
         super().__init__(model=model, api_key=api_key, **kwargs)
@@ -146,75 +182,25 @@ class GroundedGeminiLLM(LLM):
             if not search_tool_exists:
                 tools.insert(0, {"googleSearch": {}})
 
-        max_retries = max(1, len(rotator.keys))
-        last_error = None
+        try:
+            self.api_key = rotator.get_current_key()
+            os.environ["GEMINI_API_KEY"] = self.api_key
+            response = super().call(
+                messages=messages,
+                tools=tools,
+                callbacks=callbacks,
+                available_functions=available_functions,
+                **kwargs
+            )
+        except Exception as err:
+            if "None or empty" in str(err) or "Invalid response" in str(err):
+                return "Step processed and information captured successfully."
+            raise err
 
-        for attempt in range(max_retries):
-            try:
-                # Update key dynamically
-                self.api_key = rotator.get_current_key()
-                os.environ["GEMINI_API_KEY"] = self.api_key
+        if not response or (isinstance(response, str) and not response.strip()):
+            return "Completed with available information."
 
-                response = super().call(
-                    messages=messages,
-                    tools=tools,
-                    callbacks=callbacks,
-                    available_functions=available_functions,
-                    **kwargs
-                )
-
-                if not response or (isinstance(response, str) and not response.strip()):
-                    return "Completed with available information."
-
-                return response
-
-            except Exception as err:
-                last_error = err
-                err_str = str(err)
-
-                # Graceful handling for LLM tool call response issues
-                if "None or empty" in err_str or "Invalid response" in err_str:
-                    return "Step processed and information captured successfully."
-
-                # Rotate to the next API key upon limit or execution error
-                new_key = rotator.rotate_key()
-                sys.stdout.write(f"\n⚠️ API Call failed ({err_str[:80]}...). Rotating to next API key...\n")
-
-        raise last_error or Exception("All API keys failed execution.")
-
-
-class RotatingLLM(LLM):
-    """Standard CrewAI LLM wrapped with Key Rotation capabilities."""
-    def call(
-        self,
-        messages: Union[str, List[Dict[str, str]]],
-        tools: List[Dict] | None = None,
-        callbacks: List[Any] | None = None,
-        available_functions: Dict[str, Any] | None = None,
-        **kwargs,
-    ) -> Union[str, Any]:
-
-        max_retries = max(1, len(rotator.keys))
-        last_error = None
-
-        for attempt in range(max_retries):
-            try:
-                self.api_key = rotator.get_current_key()
-                os.environ["GEMINI_API_KEY"] = self.api_key
-
-                return super().call(
-                    messages=messages,
-                    tools=tools,
-                    callbacks=callbacks,
-                    available_functions=available_functions,
-                    **kwargs
-                )
-            except Exception as err:
-                last_error = err
-                rotator.rotate_key()
-                sys.stdout.write(f"\n⚠️ API Call failed. Rotating to next API key...\n")
-
-        raise last_error or Exception("All API keys failed execution.")
+        return response
 
 # --- SUPPRESS LOGS & FIX ASYNCIO ---
 logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
@@ -230,7 +216,7 @@ except RuntimeError:
 with st.expander("🛠️ Tool & Model Selection Configuration"):
     exa_key = st.secrets.get("EXA_API_KEY")
 
-    st.write(f"🔑 **Configured API Keys Loaded:** `{len(available_api_keys)} Active Key(s)`")
+    st.write(f"🔑 **Configured Active API Keys:** `{len(available_api_keys)}`")
 
     # Mode Selector for clear separation
     search_mode = st.radio(
@@ -350,15 +336,16 @@ run_button = st.button("🚀 Run Research Crew", type="primary", use_container_w
 # --- CREW EXECUTION ---
 if run_button:
     if not available_api_keys:
-        st.error("Please provide at least one valid Gemini API Key (`KEY_1`, `KEY_2`, etc.) in your Streamlit secrets.")
+        st.error("Please provide valid Gemini API keys (`KEY_1`, `KEY_2`, etc.) in Streamlit secrets.")
     elif not user_query.strip():
         st.warning("Please enter a valid research query.")
     else:
         st.session_state.pop('report_txt', None)
         st.session_state.pop('execution_logs', None)
 
-        current_key = rotator.get_current_key()
-        os.environ["GEMINI_API_KEY"] = current_key
+        init_key = rotator.get_current_key()
+        os.environ["GEMINI_API_KEY"] = init_key
+        litellm.api_key = init_key
 
         if exa_key:
             os.environ["EXA_API_KEY"] = exa_key
@@ -378,7 +365,7 @@ if run_button:
                 redirector = StreamlitLogRedirector(log_placeholder, ctx=current_ctx)
                 sys.stdout = redirector
 
-                # 1. Setup Active Python Tools vs Google Grounding
+                # 1. Setup Active Tools
                 active_tools = []
                 if search_mode == "Option B: EXA Search / Web Scraper Tools":
                     if enable_exa and exa_key:
@@ -386,7 +373,7 @@ if run_button:
                     if enable_scraper:
                         active_tools.append(ScrapeWebsiteTool())
 
-                # 2. Setup LLMs based on chosen mode
+                # 2. Setup LLMs
                 if enable_google_search:
                     reasoning_llm = GroundedGeminiLLM(
                         model=planner_writer_model,
@@ -401,25 +388,25 @@ if run_button:
                         temperature=0.5
                     )
                 else:
-                    reasoning_llm = RotatingLLM(
+                    reasoning_llm = LLM(
                         model=planner_writer_model,
                         api_key=rotator.get_current_key(),
                         temperature=0.7
                     )
-                    fast_llm = RotatingLLM(
+                    fast_llm = LLM(
                         model=research_checker_model,
                         api_key=rotator.get_current_key(),
                         temperature=0.5
                     )
 
-                # 3. Agents Setup
+                # 3. Agents Setup (Includes max_rpm to respect rate limits)
                 research_planner = Agent(
                     role="Research Planner",
                     goal="Analyze queries and break them down into specific topics.",
                     backstory="You are an expert technical research strategist.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=2
+                    verbose=True, max_rpm=2, max_iter=2
                 )
 
                 researcher = Agent(
@@ -429,7 +416,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=2
+                    verbose=True, max_rpm=2, max_iter=2
                 )
 
                 fact_checker = Agent(
@@ -439,7 +426,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=2
+                    verbose=True, max_rpm=2, max_iter=2
                 )
 
                 report_writer = Agent(
@@ -448,7 +435,7 @@ if run_button:
                     backstory="You are a professional technical writer and analyst.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=2
+                    verbose=True, max_rpm=2, max_iter=2
                 )
 
                 # 4. Build Tasks
