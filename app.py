@@ -101,6 +101,7 @@ available_api_keys = [k for k in api_keys_raw.values() if k and k.strip()]
 
 random.shuffle(available_api_keys)
 
+
 if not available_api_keys and st.secrets.get("GEMINI_API_KEY"):
     available_api_keys.append(st.secrets.get("GEMINI_API_KEY"))
 
