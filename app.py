@@ -9,7 +9,19 @@ import logging
 import asyncio
 import threading
 from typing import Any, List, Dict, Union
+
+# --- DISABLE OPENTELEMETRY & CREWAI TELEMETRY BEFORE IMPORTING CREWAI ---
+os.environ["OTEL_SDK_DISABLED"] = "true"
+os.environ["CREWAI_DISABLE_TELEMETRY"] = "true"
+os.environ["CREWAI_DISABLE_TRACKING"] = "true"
+
 import streamlit as st
+
+# Suppress OpenTelemetry and Streamlit script runner log warnings globally
+logging.getLogger("opentelemetry").setLevel(logging.CRITICAL)
+logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
+logging.getLogger("streamlit.runtime.state.session_state_proxy").setLevel(logging.ERROR)
+warnings.filterwarnings('ignore')
 
 # Try importing PyPDF for PDF document parsing
 try:
@@ -17,8 +29,20 @@ try:
 except ImportError:
     pypdf = None
 
-# Import LiteLLM to patch completion calls globally for CrewAI
+# Import LiteLLM
 import litellm
+
+# --- Safe import for Streamlit script context ---
+try:
+    from streamlit.runtime.scriptrunner_utils.script_run_context import add_script_run_ctx, get_script_run_ctx
+except ImportError:
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
+    except ImportError:
+        from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
+
+from crewai import Agent, Task, Crew, LLM
+from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
 # --- Page Configuration ---
 st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="wide")
@@ -70,18 +94,6 @@ body, .stApp {
 """
 st.markdown(page_style, unsafe_allow_html=True)
 
-# Safe import for Streamlit script context
-try:
-    from streamlit.runtime.scriptrunner_utils.script_run_context import add_script_run_ctx, get_script_run_ctx
-except ImportError:
-    try:
-        from streamlit.runtime.scriptrunner import add_script_run_ctx, get_script_run_ctx
-    except ImportError:
-        from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
-
-from crewai import Agent, Task, Crew, LLM
-from crewai_tools import EXASearchTool, ScrapeWebsiteTool
-
 # --- API KEYS ROTATION CONFIGURATION ---
 api_keys_raw = {
     "Key 1": st.secrets.get("KEY_1"),
@@ -99,9 +111,7 @@ api_keys_raw = {
 
 # Collect non-empty keys
 available_api_keys = [k for k in api_keys_raw.values() if k and k.strip()]
-
 random.shuffle(available_api_keys)
-
 
 if not available_api_keys and st.secrets.get("GEMINI_API_KEY"):
     available_api_keys.append(st.secrets.get("GEMINI_API_KEY"))
@@ -126,43 +136,63 @@ class KeyRotator:
             old_idx = self.index
             self.index = (self.index + 1) % len(self.keys)
             new_key = self.keys[self.index]
-            
-            # Apply key across environment variables
+
             os.environ["GEMINI_API_KEY"] = new_key
             os.environ["GEMINI_KEY"] = new_key
             litellm.api_key = new_key
-            
+
             sys.stdout.write(f"\n🔄 [KEY ROTATION] Switched from Key #{old_idx + 1} to Key #{self.index + 1}\n")
             return new_key
 
 rotator = KeyRotator(available_api_keys)
 
-# --- PATCH LITELLM COMPLETION FOR AUTOMATIC RETRY & ROTATION ---
+# --- PATCH LITELLM COMPLETION & ACOMPLETION FOR AUTOMATIC ROTATION ---
 _original_litellm_completion = litellm.completion
+_original_litellm_acompletion = litellm.acompletion
 
 def auto_rotating_litellm_completion(*args, **kwargs):
-    """Wrapper that catches 429/ResourceExhausted errors and rotates API key automatically."""
-    max_attempts = max(10, len(rotator.keys) * 3)
-    
+    max_attempts = max(10, len(rotator.keys) * 3) if rotator.keys else 5
+
     for attempt in range(max_attempts):
         current_key = rotator.get_current_key()
         kwargs["api_key"] = current_key
         os.environ["GEMINI_API_KEY"] = current_key
-        
+
         try:
             return _original_litellm_completion(*args, **kwargs)
         except Exception as e:
             err_msg = str(e).lower()
-            if "429" in err_msg or "resource_exhausted" in err_msg or "rate" in err_msg or "quota" in err_msg:
-                sys.stdout.write(f"\n⚠️ Rate limit hit (429/RESOURCE_EXHAUSTED). Rotating key and retrying...\n")
+            if any(k in err_msg for k in ["429", "resource_exhausted", "rate", "quota"]):
+                sys.stdout.write(f"\n⚠️ Rate limit hit. Rotating key... (Attempt {attempt+1}/{max_attempts})\n")
                 rotator.rotate_key()
-                time.sleep(2)  # Short delay before retry
+                time.sleep(3)
             else:
                 raise e
     raise Exception("All API keys exhausted or failed max retry attempts.")
 
-# Override litellm completion globally
+async def auto_rotating_litellm_acompletion(*args, **kwargs):
+    max_attempts = max(10, len(rotator.keys) * 3) if rotator.keys else 5
+
+    for attempt in range(max_attempts):
+        current_key = rotator.get_current_key()
+        kwargs["api_key"] = current_key
+        os.environ["GEMINI_API_KEY"] = current_key
+
+        try:
+            return await _original_litellm_acompletion(*args, **kwargs)
+        except Exception as e:
+            err_msg = str(e).lower()
+            if any(k in err_msg for k in ["429", "resource_exhausted", "rate", "quota"]):
+                sys.stdout.write(f"\n⚠️ Rate limit hit in async call. Rotating key...\n")
+                rotator.rotate_key()
+                await asyncio.sleep(3)
+            else:
+                raise e
+    raise Exception("All API keys exhausted or failed max retry attempts.")
+
+# Override litellm globally
 litellm.completion = auto_rotating_litellm_completion
+litellm.acompletion = auto_rotating_litellm_acompletion
 
 # --- CUSTOM GROUNDED GEMINI LLM WRAPPER ---
 class GroundedGeminiLLM(LLM):
@@ -187,43 +217,47 @@ class GroundedGeminiLLM(LLM):
             if not search_tool_exists:
                 tools.insert(0, {"googleSearch": {}})
 
-        try:
-            self.api_key = rotator.get_current_key()
-            os.environ["GEMINI_API_KEY"] = self.api_key
-            response = super().call(
-                messages=messages,
-                tools=tools,
-                callbacks=callbacks,
-                available_functions=available_functions,
-                **kwargs
-            )
-        except Exception as err:
-            if "None or empty" in str(err) or "Invalid response" in str(err):
-                return "Step processed and information captured successfully."
-            raise err
+        max_retries = max(6, len(rotator.keys) * 2) if rotator.keys else 5
+        for attempt in range(max_retries):
+            try:
+                self.api_key = rotator.get_current_key()
+                os.environ["GEMINI_API_KEY"] = self.api_key
+                
+                response = super().call(
+                    messages=messages,
+                    tools=tools,
+                    callbacks=callbacks,
+                    available_functions=available_functions,
+                    **kwargs
+                )
+                if not response or (isinstance(response, str) and not response.strip()):
+                    return "Completed with available information."
+                return response
 
-        if not response or (isinstance(response, str) and not response.strip()):
-            return "Completed with available information."
+            except Exception as err:
+                err_msg = str(err).lower()
+                if any(k in err_msg for k in ["429", "resource_exhausted", "rate", "quota"]):
+                    sys.stdout.write(f"\n⚠️ Grounded LLM 429 Error. Rotating Key and Retrying ({attempt+1}/{max_retries})...\n")
+                    rotator.rotate_key()
+                    time.sleep(4)
+                elif "none or empty" in err_msg or "invalid response" in err_msg:
+                    return "Step processed and information captured successfully."
+                else:
+                    raise err
 
-        return response
+        raise Exception("Exhausted retries in GroundedGeminiLLM due to rate limits.")
 
-# --- SUPPRESS LOGS & FIX ASYNCIO ---
-logging.getLogger("streamlit.runtime.scriptrunner.script_runner").setLevel(logging.ERROR)
-logging.getLogger("streamlit.runtime.state.session_state_proxy").setLevel(logging.ERROR)
-warnings.filterwarnings('ignore')
-
+# Fix event loop
 try:
     asyncio.get_running_loop()
 except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-# --- CREW CONFIGURATION SIDEBAR/EXPANDER ---
+# --- CREW CONFIGURATION SIDEBAR ---
 with st.expander("🛠️ Tool & Model Selection Configuration"):
     exa_key = st.secrets.get("EXA_API_KEY")
-
     st.write(f"🔑 **Configured Active API Keys:** `{len(available_api_keys)}`")
 
-    # Mode Selector for clear separation
     search_mode = st.radio(
         "Choose Search Provider Method:",
         ["Option A: Native Google Search Grounding", "Option B: EXA Search / Web Scraper Tools"],
@@ -243,12 +277,12 @@ with st.expander("🛠️ Tool & Model Selection Configuration"):
     st.subheader("🧠 Multi-Model Assignment")
     planner_writer_model = st.selectbox(
         "Planner & Writer Model",
-        ["gemini/gemini-2.5-flash", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-3.1-flash-lite", "gemini/gemini-2.5-flash-lite", "gemini/gemini-3-flash-preview", "gemini/gemini-3.1-flash-lite-preview", "gemini/gemini-3.6-flash"],
-        index=1
+        ["gemini/gemini-2.5-flash", "gemini/gemini-1.5-flash", "gemini/gemini-1.5-pro"],
+        index=0
     )
     research_checker_model = st.selectbox(
         "Researcher & Checker Model",
-        ["gemini/gemini-2.5-flash", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-3.1-flash-lite", "gemini/gemini-2.5-flash-lite", "gemini/gemini-3-flash-preview", "gemini/gemini-3.1-flash-lite-preview", "gemini/gemini-3.6-flash"],
+        ["gemini/gemini-2.5-flash", "gemini/gemini-1.5-flash", "gemini/gemini-1.5-pro"],
         index=0
     )
 
@@ -355,9 +389,6 @@ if run_button:
         if exa_key:
             os.environ["EXA_API_KEY"] = exa_key
 
-        os.environ["CREWAI_TESTING"] = "true"
-        os.environ["CREWAI_TRACING_ENABLED"] = "true"
-
         old_stdout = sys.stdout
         current_ctx = get_script_run_ctx()
 
@@ -370,7 +401,6 @@ if run_button:
                 redirector = StreamlitLogRedirector(log_placeholder, ctx=current_ctx)
                 sys.stdout = redirector
 
-                # 1. Setup Active Tools
                 active_tools = []
                 if search_mode == "Option B: EXA Search / Web Scraper Tools":
                     if enable_exa and exa_key:
@@ -378,7 +408,6 @@ if run_button:
                     if enable_scraper:
                         active_tools.append(ScrapeWebsiteTool())
 
-                # 2. Setup LLMs
                 if enable_google_search:
                     reasoning_llm = GroundedGeminiLLM(
                         model=planner_writer_model,
@@ -404,14 +433,14 @@ if run_button:
                         temperature=0.5
                     )
 
-                # 3. Agents Setup (Includes max_rpm to respect rate limits)
+                # Adjusted max_rpm to 2-3 to prevent overwhelming free-tier RPM limits
                 research_planner = Agent(
                     role="Research Planner",
                     goal="Analyze queries and break them down into specific topics.",
                     backstory="You are an expert technical research strategist.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=10
+                    verbose=True, max_rpm=2, max_iter=8
                 )
 
                 researcher = Agent(
@@ -421,7 +450,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=10
+                    verbose=True, max_rpm=2, max_iter=8
                 )
 
                 fact_checker = Agent(
@@ -431,7 +460,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=10
+                    verbose=True, max_rpm=2, max_iter=8
                 )
 
                 report_writer = Agent(
@@ -440,10 +469,9 @@ if run_button:
                     backstory="You are a professional technical writer and analyst.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=5, max_iter=10
+                    verbose=True, max_rpm=2, max_iter=8
                 )
 
-                # 4. Build Tasks
                 query_payload = user_query
                 if document_context:
                     query_payload += f"\n\n--- ATTACHED REFERENCE CONTEXT ---\n{document_context}"
@@ -473,7 +501,6 @@ if run_button:
                     guardrail=write_report_guardrail
                 )
 
-                # 5. Kickoff Crew
                 crew = Crew(
                     agents=[research_planner, researcher, fact_checker, report_writer],
                     tasks=[
@@ -487,7 +514,6 @@ if run_button:
 
                 result = crew.kickoff()
 
-                # Extract Output safely
                 report_txt = ""
                 if hasattr(result, 'raw') and result.raw:
                     report_txt = result.raw
