@@ -5,7 +5,7 @@ exa-py>=1.0.0
 google-generativeai>=0.8.0
 pydantic>=2.7.0
 pypdf
-
+litellm
 
 crewai[google-genai]
 google-genai
