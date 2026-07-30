@@ -41,8 +41,10 @@ except ImportError:
     except ImportError:
         from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
+# ✅ CORRECT
 from crewai import Agent, Task, Crew, LLM
-from crewai_tools import EXASearchTool, ScrapeWebsiteTool, tool
+from crewai.tools import tool  # <-- Import tool decorator from crewai.tools
+from crewai_tools import EXASearchTool, ScrapeWebsiteTool
 
 # --- Page Configuration ---
 st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="wide")
