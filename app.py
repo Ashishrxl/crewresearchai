@@ -42,7 +42,7 @@ except ImportError:
         from streamlit.scriptrunner import add_script_run_ctx, get_script_run_ctx
 
 from crewai import Agent, Task, Crew, LLM
-from crewai_tools import EXASearchTool, ScrapeWebsiteTool
+from crewai_tools import EXASearchTool, ScrapeWebsiteTool, tool
 
 # --- Page Configuration ---
 st.set_page_config(page_title="AI Research Crew", page_icon="📊", layout="wide")
@@ -222,7 +222,7 @@ class GroundedGeminiLLM(LLM):
             try:
                 self.api_key = rotator.get_current_key()
                 os.environ["GEMINI_API_KEY"] = self.api_key
-                
+
                 response = super().call(
                     messages=messages,
                     tools=tools,
@@ -285,6 +285,21 @@ with st.expander("🛠️ Tool & Model Selection Configuration"):
         ["gemini/gemini-2.5-flash", "gemini/gemini-3.5-flash", "gemini/gemini-3.5-flash-lite", "gemini/gemini-3.1-flash-lite", "gemini/gemini-2.5-flash-lite", "gemini/gemini-3-flash-preview", "gemini/gemini-3.6-flash"],
         index=0
     )
+
+# --- CREWAI TOOL WRAPPER FOR NATIVE GOOGLE SEARCH GROUNDING ---
+@tool("Google Native Search Grounding Tool")
+def google_search_grounding_tool(query: str) -> str:
+    """Performs a live web search using Google Grounding to retrieve up-to-date facts, references, and real-time internet data."""
+    try:
+        response = litellm.completion(
+            model=research_checker_model,
+            messages=[{"role": "user", "content": f"Search the web and provide comprehensive facts regarding: {query}"}],
+            tools=[{"googleSearch": {}}],
+            api_key=rotator.get_current_key()
+        )
+        return str(response.choices[0].message.content)
+    except Exception as e:
+        return f"Error executing search tool: {str(e)}"
 
 # --- THREAD-SAFE LOG REDIRECTOR ---
 class StreamlitLogRedirector(io.StringIO):
@@ -402,7 +417,9 @@ if run_button:
                 sys.stdout = redirector
 
                 active_tools = []
-                if search_mode == "Option B: EXA Search / Web Scraper Tools":
+                if search_mode == "Option A: Native Google Search Grounding":
+                    active_tools.append(google_search_grounding_tool)
+                elif search_mode == "Option B: EXA Search / Web Scraper Tools":
                     if enable_exa and exa_key:
                         active_tools.append(EXASearchTool(api_key=exa_key))
                     if enable_scraper:
@@ -530,34 +547,19 @@ if run_button:
 
             except Exception as e:
                 status.update(label="❌ **An error occurred during execution.**", state="error", expanded=True)
-                st.error(f"Error: {str(e)}")
+                st.error(f"Execution Error: {str(e)}")
             finally:
                 sys.stdout = old_stdout
 
-# --- DISPLAY SECTION ---
+# --- DISPLAY FINAL OUTPUT REPORT ---
 if 'report_txt' in st.session_state:
     st.markdown("---")
-    tab1, tab2, tab3 = st.tabs(["📄 Final Research Report", "🔗 Extracted Citations", "📋 Execution Logs"])
+    st.subheader("📑 Final Research Report")
+    st.markdown(st.session_state['report_txt'])
 
-    with tab1:
-        st.download_button(
-            label="📥 Download Report (.txt)",
-            data=st.session_state['report_txt'],
-            file_name="research_report.txt",
-            mime="text/plain",
-            use_container_width=True
-        )
-        st.markdown(st.session_state['report_txt'])
-
-    with tab2:
-        st.subheader("Extracted References & Links")
-        urls = re.findall(r'https?://[^\s\)]+', st.session_state['report_txt'])
-        if urls:
-            for index, url in enumerate(list(set(urls)), 1):
-                st.markdown(f"**[{index}]** [{url}]({url})")
-        else:
-            st.info("No explicit links found.")
-
-    with tab3:
-        if 'execution_logs' in st.session_state:
-            st.code(st.session_state['execution_logs'], language="bash")
+    st.download_button(
+        label="📥 Download Report as Markdown",
+        data=st.session_state['report_txt'],
+        file_name="research_report.md",
+        mime="text/markdown"
+    )
