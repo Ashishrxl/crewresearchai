@@ -153,7 +153,7 @@ _original_litellm_completion = litellm.completion
 _original_litellm_acompletion = litellm.acompletion
 
 def auto_rotating_litellm_completion(*args, **kwargs):
-    max_attempts = max(10, len(rotator.keys) * 3) if rotator.keys else 5
+    max_attempts = len(rotator.keys) * 2 if rotator.keys else 2
 
     for attempt in range(max_attempts):
         current_key = rotator.get_current_key()
