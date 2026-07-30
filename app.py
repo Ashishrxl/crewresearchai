@@ -459,7 +459,7 @@ if run_button:
                     backstory="You are an expert technical research strategist.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=3, max_iter=10
+                    verbose=True, max_rpm=3, max_iter=3
                 )
 
                 researcher = Agent(
@@ -469,7 +469,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=3, max_iter=10
+                    verbose=True, max_rpm=3, max_iter=3
                 )
 
                 fact_checker = Agent(
@@ -479,7 +479,7 @@ if run_button:
                     tools=active_tools,
                     llm=fast_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=3, max_iter=10
+                    verbose=True, max_rpm=3, max_iter=3
                 )
 
                 report_writer = Agent(
@@ -488,7 +488,7 @@ if run_button:
                     backstory="You are a professional technical writer and analyst.",
                     llm=reasoning_llm,
                     allow_delegation=False,
-                    verbose=True, max_rpm=3, max_iter=10
+                    verbose=True, max_rpm=3, max_iter=3
                 )
 
                 query_payload = user_query
