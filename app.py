@@ -411,8 +411,8 @@ if run_button:
 
         with st.status("🤖 **Research Crew in Progress...**", expanded=True) as status:
             try:
-                st.write("📋 **Live Agent Execution Logs:**")
-                log_expander = st.expander("Show/Hide Agent Thoughts", expanded=True)
+                st.write("📋 **Live Real-time Execution Logs:**")
+                log_expander = st.expander("Show/Hide Real-time Agent Logs", expanded=True)
                 log_placeholder = log_expander.empty()
 
                 redirector = StreamlitLogRedirector(log_placeholder, ctx=current_ctx)
@@ -565,3 +565,10 @@ if 'report_txt' in st.session_state:
         file_name="research_report.md",
         mime="text/markdown"
     )
+
+    # --- OPTIONAL EXECUTION LOGS EXPANDER FOR POST-RESPONSE VIEWING ---
+    if 'execution_logs' in st.session_state and st.session_state['execution_logs']:
+        st.markdown("---")
+        with st.expander("🔍 View Full Execution Logs", expanded=False):
+            st.code(st.session_state['execution_logs'], language="bash")
+
